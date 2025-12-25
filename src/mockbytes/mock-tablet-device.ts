@@ -158,17 +158,19 @@ export class MockTabletDevice {
 
   /**
    * Play a horizontal drag across the full tablet surface
+   * Uses constant pressure to isolate X coordinate changes
    */
   playHorizontalDrag(y = 0.5, duration = 1500): void {
-    const gen = this.generator.generateLine(0, y, 1, y, duration);
+    const gen = this.generator.generateLineConstantPressure(0, y, 1, y, 0.5, duration);
     this.play(gen);
   }
 
   /**
    * Play a vertical drag across the full tablet surface
+   * Uses constant pressure to isolate Y coordinate changes
    */
   playVerticalDrag(x = 0.5, duration = 1500): void {
-    const gen = this.generator.generateLine(x, 0, x, 1, duration);
+    const gen = this.generator.generateLineConstantPressure(x, 0, x, 1, 0.5, duration);
     this.play(gen);
   }
 

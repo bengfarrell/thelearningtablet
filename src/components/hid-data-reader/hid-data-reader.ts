@@ -3,50 +3,19 @@ import { customElement, state } from 'lit/decorators.js';
 import { styles } from './hid-data-reader.styles.js';
 import { MockTabletDevice, DrawingPresets } from '../../mockbytes/index.js';
 import { DeviceFinder, type DeviceConnectionResult } from '../../utils/finddevice.js';
+import {
+  analyzeBytes,
+  getBestGuessBytesByVariance,
+  generateDeviceConfig,
+  type ByteAnalysis,
+  type DeviceByteCodeMappings,
+  type StatusValue,
+  type StatusConfig,
+  type CoordinateConfig,
+  type TiltConfig,
+} from '../../utils/byte-detector.js';
 
 type WalkthroughStep = 'idle' | 'step1-horizontal' | 'step2-vertical' | 'step3-pressure' | 'step4-hover-horizontal' | 'step5-hover-vertical' | 'step6-tilt-x' | 'step7-tilt-y' | 'step8-primary-button' | 'step9-secondary-button' | 'complete';
-
-interface ByteAnalysis {
-  byteIndex: number;
-  min: number;
-  max: number;
-  variance: number;
-}
-
-interface CoordinateConfig {
-  byteIndex: number[];
-  max: number;
-  type: 'multi-byte-range';
-}
-
-interface TiltConfig {
-  byteIndex: number[];
-  positiveMax: number;
-  negativeMin: number;
-  negativeMax: number;
-  type: 'bipolar-range';
-}
-
-interface StatusValue {
-  state: string;
-  primaryButtonPressed?: boolean;
-  secondaryButtonPressed?: boolean;
-}
-
-interface StatusConfig {
-  byteIndex: number[];
-  type: 'code';
-  values: Record<string, StatusValue>;
-}
-
-interface DeviceByteCodeMappings {
-  status?: StatusConfig;
-  x: CoordinateConfig;
-  y: CoordinateConfig;
-  pressure: CoordinateConfig;
-  tiltX?: TiltConfig;
-  tiltY?: TiltConfig;
-}
 
 /**
  * HID Data Reader component for visualizing raw HID bytes
@@ -113,7 +82,6 @@ export class HidDataReader extends LitElement {
   private deviceFinder?: DeviceFinder;
   private capturedPackets: Uint8Array[] = [];
   private lastCapturedPackets: Uint8Array[] = []; // Persists between steps for live view
-  private isCapturing = false;
 
   // Track observed status byte values
   private statusByteValues: Map<number, StatusValue> = new Map();
@@ -354,15 +322,12 @@ export class HidDataReader extends LitElement {
       return html`
         <div class="section walkthrough active">
           <h3>Step 1: Horizontal Movement (Contact)</h3>
-          ${this.isRealDevice
-            ? html`
-                <p>✏️ <strong>Drag your stylus horizontally across the tablet</strong> (left to right).</p>
-                <p>This will help us identify which bytes represent the <strong>X coordinate</strong>.</p>
-              `
-            : html`
-                <p>Click the button below to simulate dragging across the tablet horizontally.</p>
-                <p>This will help us identify which bytes represent the <strong>X coordinate</strong>.</p>
-              `}
+          <p>
+            ${this.isRealDevice
+              ? '✏️ Drag your stylus horizontally across the tablet, or click simulate to inject mock data.'
+              : '🤖 Click Simulate to inject mock data.'}
+          </p>
+          <p>This will help us identify which bytes represent the <strong>X coordinate</strong>.</p>
           ${this._renderStepButtons('horizontal', 'Simulate Input')}
           ${this._renderLiveAnalysis()}
           <div class="walkthrough-progress">
@@ -998,103 +963,16 @@ export class HidDataReader extends LitElement {
     // Update current display with latest packet
     this.currentBytes = hexString;
 
-    // Capture packets during walkthrough
-    if (this.isCapturing) {
+    // Capture packets during walkthrough steps
+    const isInWalkthroughStep = this.walkthroughStep !== 'idle' && this.walkthroughStep !== 'complete';
+    if (isInWalkthroughStep) {
       this.capturedPackets.push(new Uint8Array(data));
     }
-  }
-
-  private _analyzeBytes(packets: Uint8Array[]): ByteAnalysis[] {
-    if (packets.length === 0) return [];
-
-    const packetLength = packets[0].length;
-    const analysis: ByteAnalysis[] = [];
-
-    // Analyze each byte position
-    for (let byteIndex = 0; byteIndex < packetLength; byteIndex++) {
-      const values = packets.map(packet => packet[byteIndex]);
-      const min = Math.min(...values);
-      const max = Math.max(...values);
-      const variance = max - min;
-
-      analysis.push({
-        byteIndex,
-        min,
-        max,
-        variance,
-      });
-    }
-
-    return analysis;
   }
 
   private _identifySignificantBytes(analysis: ByteAnalysis[], threshold = 10): ByteAnalysis[] {
     // Return bytes that have significant variance (likely coordinate data)
     return analysis.filter(byte => byte.variance > threshold);
-  }
-
-  private _getBestGuessBytesByVariance(analysis: ByteAnalysis[], maxBytes = 3, minVariance = 50): ByteAnalysis[] {
-    // Sort by variance (descending) and take top N bytes
-    // This gives us the "best guess" for which bytes are actually relevant
-    // minVariance filters out noise and small fluctuations
-    const significantBytes = analysis
-      .filter(byte => byte.variance > minVariance)
-      .sort((a, b) => b.variance - a.variance);
-
-    // Strategy:
-    // - If maxBytes === 1, we're looking for a single byte (like tilt) - skip pair detection
-    // - Otherwise, prioritize consecutive byte pairs (likely multi-byte values like coordinates)
-
-    const result: ByteAnalysis[] = [];
-    const used = new Set<number>();
-
-    // For single-byte detection (tilt), skip the pair logic and just return the top byte
-    if (maxBytes === 1) {
-      if (significantBytes.length > 0) {
-        return [significantBytes[0]];
-      }
-      return [];
-    }
-
-    // First pass: Find consecutive byte pairs where BOTH have high variance
-    // This identifies multi-byte values (X, Y, pressure) which use 2 bytes each
-    for (let i = 0; i < analysis.length - 1; i++) {
-      const byte = analysis[i];
-      const nextByte = analysis[i + 1];
-
-      if (used.has(byte.byteIndex) || used.has(nextByte.byteIndex)) continue;
-
-      // Check if they're consecutive and both have high variance
-      if (nextByte.byteIndex === byte.byteIndex + 1 &&
-          byte.variance > minVariance &&
-          nextByte.variance > minVariance) {
-
-        // Both bytes have high variance and are consecutive - likely a multi-byte value
-        result.push(byte);
-        result.push(nextByte);
-        used.add(byte.byteIndex);
-        used.add(nextByte.byteIndex);
-
-        // For coordinate detection, we typically want just 1 pair (2 bytes)
-        // This prevents detecting tilt bytes (8, 9) when looking for X (2, 3)
-        if (result.length >= 2) break;
-      }
-    }
-
-    // Second pass: If we didn't find consecutive pairs, add single high-variance bytes
-    // This handles single-byte values like tilt
-    if (result.length === 0) {
-      for (const byte of significantBytes) {
-        if (used.has(byte.byteIndex)) continue;
-
-        result.push(byte);
-        used.add(byte.byteIndex);
-
-        if (result.length >= maxBytes) break;
-      }
-    }
-
-    return result.sort((a, b) => a.byteIndex - b.byteIndex);
   }
 
   private async _playGesture(gesture: string) {
@@ -1129,13 +1007,8 @@ export class HidDataReader extends LitElement {
       return; // Only allow secondary button in step 9
     }
 
-    // Start capturing if in walkthrough mode
-    const isWalkthroughStep = ['step1-horizontal', 'step2-vertical', 'step3-hover-horizontal', 'step4-hover-vertical', 'step5-tilt-x', 'step6-tilt-y', 'step7-primary-button', 'step8-secondary-button'].includes(this.walkthroughStep);
-    if (isWalkthroughStep) {
-      this.capturedPackets = [];
-      this.isCapturing = true;
-    }
-
+    // Just inject data - don't auto-start or auto-complete
+    // The user controls when to start/stop capturing
     this.isPlaying = true;
     this.currentGesture = gesture;
 
@@ -1189,11 +1062,10 @@ export class HidDataReader extends LitElement {
         this.mockDevice.playCircle();
     }
 
-    // Auto-stop when gesture completes
+    // Auto-stop when gesture completes (but don't auto-advance the step)
     setTimeout(() => {
       if (this.isPlaying && this.currentGesture === gesture) {
         this._stopGesture();
-        this._handleGestureComplete(gesture);
       }
     }, this._getGestureDuration(gesture));
   }
@@ -1201,53 +1073,61 @@ export class HidDataReader extends LitElement {
   private _handleGestureComplete(gesture: string) {
     // Process captured data if in walkthrough mode
     if (this.walkthroughStep === 'step1-horizontal' && gesture === 'horizontal') {
-      this.isCapturing = false;
       // Save packets for persistent live view
       this.lastCapturedPackets = [...this.capturedPackets];
-      const analysis = this._analyzeBytes(this.capturedPackets);
-      // Store best guess bytes for horizontal movement
-      this.horizontalBytes = this._getBestGuessBytesByVariance(analysis, 3);
+      const analysis = analyzeBytes(this.capturedPackets);
+      // Store best guess bytes for horizontal movement (top 2 bytes for X coordinate)
+      this.horizontalBytes = getBestGuessBytesByVariance(analysis, 2);
       // Track status byte for contact
       this._trackStatusByte('contact');
       this.walkthroughStep = 'step2-vertical';
+      this.capturedPackets = [];
     } else if (this.walkthroughStep === 'step2-vertical' && gesture === 'vertical') {
-      this.isCapturing = false;
       this.lastCapturedPackets = [...this.capturedPackets];
-      const analysis = this._analyzeBytes(this.capturedPackets);
-      // Store best guess bytes for vertical movement
-      this.verticalBytes = this._getBestGuessBytesByVariance(analysis, 3);
+      const analysis = analyzeBytes(this.capturedPackets);
+      // Filter out bytes we already identified in step 1 (X coordinate)
+      const knownByteIndices = new Set(this.horizontalBytes.map(b => b.byteIndex));
+      const filteredAnalysis = analysis.filter(b => !knownByteIndices.has(b.byteIndex));
+      // Store best guess bytes for vertical movement (top 2 bytes for Y coordinate)
+      this.verticalBytes = getBestGuessBytesByVariance(filteredAnalysis, 2);
       this.walkthroughStep = 'step3-pressure';
+      this.capturedPackets = [];
     } else if (this.walkthroughStep === 'step3-pressure' && gesture === 'pressure') {
-      this.isCapturing = false;
       this.lastCapturedPackets = [...this.capturedPackets];
-      const analysis = this._analyzeBytes(this.capturedPackets);
-      // Store best guess bytes for pressure
-      this.pressureBytes = this._getBestGuessBytesByVariance(analysis, 3);
+      const analysis = analyzeBytes(this.capturedPackets);
+      // Filter out bytes we already identified (X and Y coordinates)
+      const knownByteIndices = new Set([
+        ...this.horizontalBytes.map(b => b.byteIndex),
+        ...this.verticalBytes.map(b => b.byteIndex),
+      ]);
+      const filteredAnalysis = analysis.filter(b => !knownByteIndices.has(b.byteIndex));
+      // Store best guess bytes for pressure (top 2 bytes)
+      this.pressureBytes = getBestGuessBytesByVariance(filteredAnalysis, 2);
       this.walkthroughStep = 'step4-hover-horizontal';
+      this.capturedPackets = [];
     } else if (this.walkthroughStep === 'step4-hover-horizontal' && gesture === 'hover-horizontal') {
-      this.isCapturing = false;
       this.lastCapturedPackets = [...this.capturedPackets];
-      const analysis = this._analyzeBytes(this.capturedPackets);
+      const analysis = analyzeBytes(this.capturedPackets);
       // Store bytes that changed during horizontal hover (X coordinate only, no pressure)
-      this.hoverHorizontalBytes = this._getBestGuessBytesByVariance(analysis, 2);
+      this.hoverHorizontalBytes = getBestGuessBytesByVariance(analysis, 2);
       // Track status byte for hover
       this._trackStatusByte('hover');
       this.walkthroughStep = 'step5-hover-vertical';
+      this.capturedPackets = [];
     } else if (this.walkthroughStep === 'step5-hover-vertical' && gesture === 'hover-vertical') {
-      this.isCapturing = false;
       this.lastCapturedPackets = [...this.capturedPackets];
-      const analysis = this._analyzeBytes(this.capturedPackets);
+      const analysis = analyzeBytes(this.capturedPackets);
       // Store bytes that changed during vertical hover (Y coordinate only, no pressure)
-      this.hoverVerticalBytes = this._getBestGuessBytesByVariance(analysis, 2);
+      this.hoverVerticalBytes = getBestGuessBytesByVariance(analysis, 2);
 
       // Identify X, Y, and pressure before moving to tilt
       this._identifyCoordinateAndPressureBytes();
 
       this.walkthroughStep = 'step6-tilt-x';
+      this.capturedPackets = [];
     } else if (this.walkthroughStep === 'step6-tilt-x' && gesture === 'tilt-x') {
-      this.isCapturing = false;
       this.lastCapturedPackets = [...this.capturedPackets];
-      const analysis = this._analyzeBytes(this.capturedPackets);
+      const analysis = analyzeBytes(this.capturedPackets);
       // Filter out already-identified bytes (X, Y, pressure)
       const knownByteIndices = new Set([
         ...this.horizontalBytes.map(b => b.byteIndex),
@@ -1255,12 +1135,12 @@ export class HidDataReader extends LitElement {
         ...this.pressureBytes.map(b => b.byteIndex),
       ]);
       const tiltOnlyBytes = analysis.filter(b => !knownByteIndices.has(b.byteIndex));
-      this.tiltXBytes = this._getBestGuessBytesByVariance(tiltOnlyBytes, 1); // Just the top byte
+      this.tiltXBytes = getBestGuessBytesByVariance(tiltOnlyBytes, 1); // Just the top byte
       this.walkthroughStep = 'step7-tilt-y';
+      this.capturedPackets = [];
     } else if (this.walkthroughStep === 'step7-tilt-y' && gesture === 'tilt-y') {
-      this.isCapturing = false;
       this.lastCapturedPackets = [...this.capturedPackets];
-      const analysis = this._analyzeBytes(this.capturedPackets);
+      const analysis = analyzeBytes(this.capturedPackets);
       // Filter out already-identified bytes (X, Y, pressure, AND tilt-X)
       const knownByteIndices = new Set([
         ...this.horizontalBytes.map(b => b.byteIndex),
@@ -1269,14 +1149,14 @@ export class HidDataReader extends LitElement {
         ...this.tiltXBytes.map(b => b.byteIndex), // Exclude tilt-X from step 6
       ]);
       const tiltOnlyBytes = analysis.filter(b => !knownByteIndices.has(b.byteIndex));
-      this.tiltYBytes = this._getBestGuessBytesByVariance(tiltOnlyBytes, 1); // Just the top byte
+      this.tiltYBytes = getBestGuessBytesByVariance(tiltOnlyBytes, 1); // Just the top byte
 
       // Identify tilt bytes
       this._identifyTiltBytes();
 
       this.walkthroughStep = 'step8-primary-button';
+      this.capturedPackets = [];
     } else if (this.walkthroughStep === 'step8-primary-button' && gesture === 'primary-button') {
-      this.isCapturing = false;
       this.lastCapturedPackets = [...this.capturedPackets];
       // Track status byte value for primary button
       if (this.capturedPackets.length > 0) {
@@ -1287,8 +1167,8 @@ export class HidDataReader extends LitElement {
         });
       }
       this.walkthroughStep = 'step9-secondary-button';
+      this.capturedPackets = [];
     } else if (this.walkthroughStep === 'step9-secondary-button' && gesture === 'secondary-button') {
-      this.isCapturing = false;
       this.lastCapturedPackets = [...this.capturedPackets];
       // Track status byte value for secondary button
       if (this.capturedPackets.length > 0) {
@@ -1330,7 +1210,7 @@ export class HidDataReader extends LitElement {
     // - Not already identified as X, Y, pressure, or tilt
     if (this.capturedPackets.length === 0) return null;
 
-    const analysis = this._analyzeBytes(this.capturedPackets);
+    const analysis = analyzeBytes(this.capturedPackets);
     const knownByteIndices = new Set([
       ...this.horizontalBytes.map(b => b.byteIndex),
       ...this.verticalBytes.map(b => b.byteIndex),
@@ -1368,154 +1248,16 @@ export class HidDataReader extends LitElement {
   }
 
   private _generateDeviceConfig() {
-    // Group consecutive bytes for multi-byte values (0-based internally)
-    const xBytes = this._groupConsecutiveBytes(this.horizontalBytes);
-    const yBytes = this._groupConsecutiveBytes(this.verticalBytes);
-    const pressureBytes = this._groupConsecutiveBytes(this.pressureBytes);
-
-    // Calculate max values from the observed data
-    const xMax = this._calculateMultiByteMax(xBytes, this.horizontalBytes);
-    const yMax = this._calculateMultiByteMax(yBytes, this.verticalBytes);
-    const pressureMax = this._calculateMultiByteMax(pressureBytes, this.pressureBytes);
-
-    // Convert to 1-based indexing for JSON spec
-    const config: DeviceByteCodeMappings = {
-      x: {
-        byteIndex: xBytes.map(i => i + 1),
-        max: xMax,
-        type: 'multi-byte-range',
-      },
-      y: {
-        byteIndex: yBytes.map(i => i + 1),
-        max: yMax,
-        type: 'multi-byte-range',
-      },
-      pressure: {
-        byteIndex: pressureBytes.map(i => i + 1),
-        max: pressureMax,
-        type: 'multi-byte-range',
-      },
-    };
-
-    // Add status byte mappings if detected
-    if (this.statusByteValues.size > 0) {
-      const statusByteIndex = this._findStatusByte();
-      if (statusByteIndex !== null) {
-        const values: Record<string, StatusValue> = {};
-        this.statusByteValues.forEach((value, byteValue) => {
-          values[byteValue.toString()] = value;
-        });
-
-        config.status = {
-          byteIndex: [statusByteIndex + 1], // Convert to 1-based indexing
-          type: 'code',
-          values,
-        };
-      }
-    }
-
-    // Add tilt if detected
-    if (this.tiltXBytes.length > 0) {
-      const tiltXByteIndices = this._groupConsecutiveBytes(this.tiltXBytes);
-      const tiltXConfig = this._calculateBipolarRange(tiltXByteIndices, this.tiltXBytes);
-      config.tiltX = tiltXConfig;
-    }
-
-    if (this.tiltYBytes.length > 0) {
-      const tiltYByteIndices = this._groupConsecutiveBytes(this.tiltYBytes);
-      const tiltYConfig = this._calculateBipolarRange(tiltYByteIndices, this.tiltYBytes);
-      config.tiltY = tiltYConfig;
-    }
-
-    this.deviceConfig = config;
-  }
-
-  private _groupConsecutiveBytes(bytes: ByteAnalysis[]): number[] {
-    if (bytes.length === 0) return [];
-
-    // Sort by byte index
-    const sorted = [...bytes].sort((a, b) => a.byteIndex - b.byteIndex);
-
-    // Return all byte indices (they should be consecutive for multi-byte values)
-    return sorted.map(b => b.byteIndex);
-  }
-
-  private _calculateBipolarRange(byteIndices: number[], analysis: ByteAnalysis[]): TiltConfig {
-    if (byteIndices.length === 0 || analysis.length === 0) {
-      return {
-        byteIndex: byteIndices.map(i => i + 1), // Convert to 1-based indexing
-        positiveMax: 60,
-        negativeMin: 256,
-        negativeMax: 196,
-        type: 'bipolar-range',
-      };
-    }
-
-    // For tilt, we expect a single byte with values split into positive and negative ranges
-    // Our mock data maps tilt from -1 to +1 to byte values 0-255
-    // The mock generator uses: tiltByte = ((tilt + 1) / 2) * 255
-    // So: -1 → 0, 0 → 127.5, +1 → 255
-
-    const byte = analysis[0];
-    const midpoint = 128;
-
-    // Positive range: 0 to observed max (if max < midpoint) or 0 to midpoint-1
-    // Negative range: midpoint to 255
-    // Note: XP-Pen uses positiveMax: 60, negativeMin: 256, negativeMax: 196
-    // This suggests: positive is 0-60, negative is 196-255 (wrapping to 256)
-
-    // For our mock data, we'll use the observed ranges
-    const positiveMax = Math.min(byte.max, 127);
-    const negativeMin = 256; // Indicates wraparound
-    const negativeMax = Math.max(byte.max, 196);
-
-    return {
-      byteIndex: byteIndices.map(i => i + 1), // Convert to 1-based indexing
-      positiveMax,
-      negativeMin,
-      negativeMax,
-      type: 'bipolar-range',
-    };
-  }
-
-  private _calculateMultiByteMax(byteIndices: number[], analysis: ByteAnalysis[]): number {
-    if (byteIndices.length === 0) return 0;
-
-    // Find the maximum value observed across all bytes
-    // For multi-byte values, we need to reconstruct the full value
-    let maxValue = 0;
-
-    for (const byte of analysis) {
-      if (byte.max > maxValue) {
-        maxValue = byte.max;
-      }
-    }
-
-    // For multi-byte values (little-endian), calculate the combined max
-    // This is an approximation based on the highest byte value observed
-    if (byteIndices.length === 2) {
-      // For 2-byte values, use the max from the analysis
-      // Round up to a reasonable value
-      const observedMax = analysis.reduce((max, byte) => {
-        return Math.max(max, byte.max);
-      }, 0);
-
-      // If we have both bytes, estimate the full range
-      if (analysis.length === 2) {
-        const lowByte = analysis.find(b => b.byteIndex === byteIndices[0]);
-        const highByte = analysis.find(b => b.byteIndex === byteIndices[1]);
-
-        if (lowByte && highByte) {
-          // Reconstruct approximate max value (little-endian)
-          const reconstructedMax = lowByte.max + (highByte.max << 8);
-          return reconstructedMax;
-        }
-      }
-
-      return observedMax * 256; // Rough estimate for 2-byte range
-    }
-
-    return maxValue;
+    // Use the utility function to generate the config
+    this.deviceConfig = generateDeviceConfig(
+      this.horizontalBytes,
+      this.verticalBytes,
+      this.pressureBytes,
+      this.tiltXBytes,
+      this.tiltYBytes,
+      this.statusByteValues,
+      this.lastCapturedPackets
+    );
   }
 
   private _getGestureDuration(gesture: string): number {
@@ -1563,13 +1305,6 @@ export class HidDataReader extends LitElement {
     this.capturedPackets = [];
     this.activeDeviceIndices.clear();
     this._clearBytes();
-
-    // For real device, we'll start capturing when user performs the gesture
-    // Don't start capturing immediately to avoid picking up residual packets
-    if (this.isRealDevice) {
-      this.capturedPackets = [];
-      this.isCapturing = false; // Will be set to true when user starts gesture
-    }
   }
 
   private _renderAccumulatedResults() {
@@ -1735,8 +1470,9 @@ export class HidDataReader extends LitElement {
 
   private _renderLiveAnalysis() {
     // Show live analysis whenever we have captured packets
-    // Use current packets if capturing, otherwise use last captured packets
-    const packetsToShow = this.isCapturing && this.capturedPackets.length > 0
+    // Use current packets if in a step, otherwise use last captured packets
+    const isInWalkthroughStep = this.walkthroughStep !== 'idle' && this.walkthroughStep !== 'complete';
+    const packetsToShow = isInWalkthroughStep && this.capturedPackets.length > 0
       ? this.capturedPackets
       : this.lastCapturedPackets;
 
@@ -1744,13 +1480,13 @@ export class HidDataReader extends LitElement {
       return html``;
     }
 
-    const titleSuffix = this.isCapturing ? ' (Live)' : '';
+    const titleSuffix = isInWalkthroughStep ? ' (Live)' : '';
 
     // Get the latest packet
     const latestPacket = packetsToShow[packetsToShow.length - 1];
 
     // Analyze captured packets in real-time
-    const analysis = this._analyzeBytes(packetsToShow);
+    const analysis = analyzeBytes(packetsToShow);
 
     // Filter out bytes we've already identified in previous steps
     const knownByteIndices = new Set([
@@ -1783,7 +1519,7 @@ export class HidDataReader extends LitElement {
     });
 
     // Get best guess bytes (top 3 by variance) - this is what we think is relevant
-    const bestGuessBytes = this._getBestGuessBytesByVariance(movementAnalysis, 3);
+    const bestGuessBytes = getBestGuessBytesByVariance(movementAnalysis, 3);
     const bestGuessIndices = new Set(bestGuessBytes.map(b => b.byteIndex));
 
     // Create a map of byte index to analysis data
@@ -1824,47 +1560,27 @@ export class HidDataReader extends LitElement {
   }
 
   private _renderStepButtons(gesture: string, mockLabel: string) {
-    if (this.isRealDevice) {
-      return html`
-        <div class="step-buttons">
-          ${!this.isCapturing
-            ? html`
-                <button class="button primary" @click="${this._startCapture}">
-                  ▶️ Start - I'm Ready
-                </button>
-              `
-            : html`
-                <p class="info-message" style="background: #fff3cd; border-left-color: #ffc107; color: #856404;">
-                  📝 Recording... Perform the gesture now, then click Done.
-                </p>
-                <div class="button-group">
-                  <button class="button secondary" @click="${this._resetCapture}">
-                    🔄 Reset
-                  </button>
-                  <button class="button primary" @click="${() => this._completeManualStep(gesture)}">
-                    ✓ Done - Next Step
-                  </button>
-                </div>
-              `}
+    return html`
+      <div class="step-buttons">
+        <p class="info-message" style="background: #fff3cd; border-left-color: #ffc107; color: #856404;">
+          📝 Recording... ${this.isRealDevice ? 'Use your tablet or simulate' : 'Click simulate to generate data'}.
+        </p>
+        <div class="button-group">
+          <button
+            class="button secondary"
+            ?disabled="${this.isPlaying}"
+            @click="${() => this._playGesture(gesture)}">
+            ${this.isPlaying ? '⏳ Simulating...' : `🤖 ${mockLabel}`}
+          </button>
+          <button class="button secondary" @click="${this._resetCapture}">
+            🔄 Reset
+          </button>
+          <button class="button primary" @click="${() => this._completeManualStep(gesture)}">
+            ✓ Done - Next Step
+          </button>
         </div>
-      `;
-    } else {
-      return html`
-        <button
-          class="button primary"
-          ?disabled="${this.isPlaying}"
-          @click="${() => this._playGesture(gesture)}">
-          ${this.isPlaying ? '⏳ Simulating...' : `▶️ ${mockLabel}`}
-        </button>
-      `;
-    }
-  }
-
-  private _startCapture() {
-    // Clear any residual packets and start fresh
-    this.capturedPackets = [];
-    this.isCapturing = true;
-    this.requestUpdate();
+      </div>
+    `;
   }
 
   private _resetCapture() {
@@ -1874,9 +1590,6 @@ export class HidDataReader extends LitElement {
   }
 
   private _completeManualStep(gesture: string) {
-    // Stop capturing
-    this.isCapturing = false;
-
     // Process the captured data as if the gesture completed
     this._handleGestureComplete(gesture);
   }
@@ -1892,7 +1605,6 @@ export class HidDataReader extends LitElement {
     this.pressureBytes = [];
     this.deviceConfig = null;
     this.capturedPackets = [];
-    this.isCapturing = false;
     this.statusByteValues.clear();
     this._clearBytes();
   }

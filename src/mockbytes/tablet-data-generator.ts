@@ -56,6 +56,7 @@ export class TabletDataGenerator {
 
   /**
    * Generate a single data packet
+   * Note: WebHID strips the Report ID from inputreport events, so we don't include it
    */
   generatePacket(x: number, y: number, pressure: number, tiltX = 0, tiltY = 0, statusByteOverride?: number): Uint8Array {
     // Normalize coordinates to device range
@@ -68,18 +69,18 @@ export class TabletDataGenerator {
     const tiltXByte = Math.round(((tiltX + 1) / 2) * 255);
     const tiltYByte = Math.round(((tiltY + 1) / 2) * 255);
 
-    // Create HID packet matching XP-Pen Deco 640 structure
-    const packet = new Uint8Array(10);
-    packet[0] = this.config.reportId;           // Report ID
-    packet[1] = statusByteOverride ?? this.config.statusByte; // Status byte (stylus mode or override)
-    packet[2] = normalizedX & 0xff;             // X low byte
-    packet[3] = (normalizedX >> 8) & 0xff;      // X high byte
-    packet[4] = normalizedY & 0xff;             // Y low byte
-    packet[5] = (normalizedY >> 8) & 0xff;      // Y high byte
-    packet[6] = normalizedPressure & 0xff;      // Pressure low byte
-    packet[7] = (normalizedPressure >> 8) & 0xff; // Pressure high byte
-    packet[8] = tiltXByte;                      // Tilt X
-    packet[9] = tiltYByte;                      // Tilt Y
+    // Create HID packet matching XP-Pen Deco 640 structure (without Report ID)
+    // WebHID strips the Report ID from inputreport events, so we match that behavior
+    const packet = new Uint8Array(9);
+    packet[0] = statusByteOverride ?? this.config.statusByte; // Status byte (stylus mode or override)
+    packet[1] = normalizedX & 0xff;             // X low byte
+    packet[2] = (normalizedX >> 8) & 0xff;      // X high byte
+    packet[3] = normalizedY & 0xff;             // Y low byte
+    packet[4] = (normalizedY >> 8) & 0xff;      // Y high byte
+    packet[5] = normalizedPressure & 0xff;      // Pressure low byte
+    packet[6] = (normalizedPressure >> 8) & 0xff; // Pressure high byte
+    packet[7] = tiltXByte;                      // Tilt X
+    packet[8] = tiltYByte;                      // Tilt Y
 
     return packet;
   }
@@ -158,6 +159,29 @@ export class TabletDataGenerator {
       { x: endX, y: endY },
     ];
     yield* this.generatePath(path, duration);
+  }
+
+  /**
+   * Generate a straight line with constant pressure
+   * Useful for isolating coordinate changes without pressure variation
+   */
+  *generateLineConstantPressure(
+    startX: number,
+    startY: number,
+    endX: number,
+    endY: number,
+    pressure: number,
+    duration: number
+  ): Generator<Uint8Array> {
+    const totalSamples = Math.floor((duration / 1000) * this.config.sampleRate);
+
+    for (let i = 0; i < totalSamples; i++) {
+      const t = i / totalSamples;
+      const x = startX + (endX - startX) * t;
+      const y = startY + (endY - startY) * t;
+
+      yield this.generatePacket(x, y, pressure, 0, 0);
+    }
   }
 
   /**
@@ -381,17 +405,17 @@ export class TabletDataGenerator {
 
   /**
    * Generate button press packet
+   * Note: WebHID strips the Report ID, so we don't include it
    */
   generateButtonPacket(buttonNumber: number): Uint8Array {
-    const packet = new Uint8Array(8);
-    packet[0] = this.config.reportId;
-    packet[1] = 0x02; // Button mode status
+    const packet = new Uint8Array(7);
+    packet[0] = 0x02; // Button mode status
+    packet[1] = 0;
     packet[2] = 0;
     packet[3] = 0;
     packet[4] = 0;
     packet[5] = 0;
-    packet[6] = 0;
-    packet[7] = 1 << (buttonNumber - 1); // Set button bit
+    packet[6] = 1 << (buttonNumber - 1); // Set button bit
 
     return packet;
   }
