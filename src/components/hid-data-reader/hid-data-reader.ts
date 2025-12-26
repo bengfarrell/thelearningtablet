@@ -944,7 +944,7 @@ export class HidDataReader extends LitElement {
     }
 
     // Track which devices are active during walkthrough
-    if (this.isCapturing && this.walkthroughStep !== 'idle' && this.walkthroughStep !== 'complete') {
+    if (this.walkthroughStep !== 'idle' && this.walkthroughStep !== 'complete') {
       this.activeDeviceIndices.add(deviceIndex);
     }
 
