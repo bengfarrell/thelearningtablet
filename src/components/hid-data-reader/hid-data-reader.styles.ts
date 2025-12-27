@@ -602,23 +602,32 @@ export const styles = css`
     font-size: 13px;
   }
 
+  .analysis-subtitle.empty-state {
+    padding: 46px 20px;
+    text-align: center;
+    font-size: 14px;
+    margin: 0;
+  }
+
   .live-bytes-grid {
     display: flex;
     flex-wrap: nowrap;
     gap: 8px;
     overflow-x: auto;
-    padding: 15px 0 5px 0; /* Top padding for labels */
+    padding: 0;
   }
 
   .live-byte-cell {
     position: relative;
     flex: 0 0 auto;
     min-width: 60px;
+    height: 85px;
     padding: 10px 5px 6px 5px;
     background: rgba(255, 255, 255, 0.95);
     border-radius: 6px;
     text-align: center;
     transition: all 0.2s ease;
+    box-sizing: border-box;
   }
 
   .live-byte-cell.best-guess {
@@ -632,6 +641,18 @@ export const styles = css`
     background: rgba(255, 255, 255, 1);
     border: 2px solid #667eea;
     box-shadow: 0 4px 12px rgba(102, 126, 234, 0.3);
+  }
+
+  .live-byte-cell.empty-placeholder {
+    background: rgba(255, 255, 255, 0.2);
+    border: 2px dashed rgba(255, 255, 255, 0.3);
+  }
+
+  .live-byte-cell.empty-placeholder .byte-label,
+  .live-byte-cell.empty-placeholder .byte-value,
+  .live-byte-cell.empty-placeholder .byte-hex,
+  .live-byte-cell.empty-placeholder .byte-meta {
+    color: rgba(255, 255, 255, 0.5);
   }
 
   .byte-type-label {
@@ -796,6 +817,90 @@ export const styles = css`
     background: #2196f3;
     color: white;
   }
+
+  /* Step header with title and progress bar */
+  .step-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 15px;
+    gap: 15px;
+  }
+
+  .step-header h3 {
+    margin: 0;
+    flex: 1;
+  }
+
+  .icon-button {
+    width: 32px;
+    height: 32px;
+    border: 2px solid #667eea;
+    background: white;
+    border-radius: 50%;
+    cursor: pointer;
+    font-size: 16px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.2s ease;
+    padding: 0;
+    flex-shrink: 0;
+  }
+
+  .icon-button:hover {
+    background: #667eea;
+    transform: scale(1.1);
+    box-shadow: 0 2px 8px rgba(102, 126, 234, 0.3);
+  }
+
+  .icon-button:active {
+    transform: scale(0.95);
+  }
+
+  .icon-button:disabled {
+    opacity: 0.3;
+    cursor: not-allowed;
+    pointer-events: none;
+  }
+
+  /* Step description with simulate button */
+  .step-description {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 15px;
+  }
+
+  .step-description p {
+    margin: 0;
+    flex: 1;
+  }
+
+  .simulate-button {
+    padding: 4px 10px;
+    font-size: 12px;
+    border: 1px solid #667eea;
+    background: white;
+    color: #667eea;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    white-space: nowrap;
+    flex-shrink: 0;
+  }
+
+  .simulate-button:hover:not(:disabled) {
+    background: #667eea;
+    color: white;
+  }
+
+  .simulate-button:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+
+
 
   /* Byte analysis styles */
   .byte-analysis {
@@ -1050,6 +1155,41 @@ export const styles = css`
   .status-flag.secondary {
     background: #ff9800;
     color: white;
+  }
+
+  /* Config Panel */
+  .config-panel {
+    margin: 20px 0;
+    border: 2px solid #667eea;
+    border-radius: 8px;
+    overflow: hidden;
+  }
+
+  .config-panel-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 15px 20px;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white;
+    cursor: pointer;
+    user-select: none;
+    transition: background 0.2s ease;
+  }
+
+  .config-panel-header:hover {
+    background: linear-gradient(135deg, #5568d3 0%, #653a8b 100%);
+  }
+
+  .config-panel-header h4 {
+    margin: 0;
+    font-size: 16px;
+    font-weight: 600;
+  }
+
+  .collapse-icon {
+    font-size: 12px;
+    transition: transform 0.2s ease;
   }
 `;
 

@@ -14,6 +14,10 @@ import {
   type CoordinateConfig,
   type TiltConfig,
 } from '../../utils/byte-detector.js';
+import '../bytes-display/bytes-display.js';
+import type { ByteData } from '../bytes-display/bytes-display.js';
+import '../hid-json-config/hid-json-config.js';
+import '../hid-walkthrough-progress/hid-walkthrough-progress.js';
 
 type WalkthroughStep = 'idle' | 'step1-horizontal' | 'step2-vertical' | 'step3-pressure' | 'step4-hover-horizontal' | 'step5-hover-vertical' | 'step6-tilt-x' | 'step7-tilt-y' | 'step8-primary-button' | 'step9-secondary-button' | 'complete';
 
@@ -38,7 +42,7 @@ export class HidDataReader extends LitElement {
   private byteCount = 0;
 
   @state()
-  private walkthroughStep: WalkthroughStep = 'idle';
+  private walkthroughStep: WalkthroughStep = 'step1-horizontal';
 
   @state()
   private horizontalBytes: ByteAnalysis[] = [];
@@ -63,6 +67,9 @@ export class HidDataReader extends LitElement {
 
   @state()
   private deviceConfig: DeviceByteCodeMappings | null = null;
+
+  @state()
+  private isConfigPanelExpanded = true;
 
   @state()
   private isRealDevice = false;
@@ -105,8 +112,6 @@ export class HidDataReader extends LitElement {
   render() {
     return html`
       <div class="header">
-        <h2>HID Data Reader</h2>
-        <p>Visualize raw HID bytes from ${this.isRealDevice ? 'real' : 'mock'} tablet</p>
         ${this._renderDeviceStatus()}
       </div>
 
@@ -115,7 +120,7 @@ export class HidDataReader extends LitElement {
 
         ${this.isRealDevice && this.deviceDataStreams.size > 0
           ? this._renderDeviceStreams()
-          : this._renderMockDeviceStream()
+          : ''
         }
       </div>
     `;
@@ -237,31 +242,7 @@ export class HidDataReader extends LitElement {
     `;
   }
 
-  private _renderMockDeviceStream() {
-    return html`
-      <div class="section">
-        <h3>Raw Byte Stream</h3>
-        <div class="device-stream-panel active">
-          <div class="stream-header">
-            <div class="stream-title-row">
-              <span class="stream-title">🤖 Mock Device</span>
-              <span class="stream-count">${this.byteCount} packets</span>
-            </div>
-          </div>
-          <div class="stream-byte-display">
-            ${this.currentBytes === ''
-              ? html`<p class="empty-message">No data yet. Click a gesture button to start.</p>`
-              : html`
-                  <div class="byte-packet">
-                    <span class="packet-label">Latest Packet:</span>
-                    <span class="packet-bytes">${this.currentBytes}</span>
-                  </div>
-                `}
-          </div>
-        </div>
-      </div>
-    `;
-  }
+
 
   private _renderActiveDeviceInfo() {
     if (this.activeDeviceIndices.size === 0) return '';
@@ -295,356 +276,208 @@ export class HidDataReader extends LitElement {
   }
 
   private _renderWalkthrough() {
-    if (this.walkthroughStep === 'idle') {
-      return html`
-        <div class="section walkthrough">
-          <h3>📚 Byte Discovery Walkthrough</h3>
-          <p>Learn which bytes in the HID data represent X and Y coordinates.</p>
-          ${this.isRealDevice
-            ? html`
-                <p class="info-message">
-                  ℹ️ Real device connected! Follow the walkthrough steps and perform the gestures on your tablet.
-                </p>
-              `
-            : html`
-                <p class="info-message">
-                  🤖 Using mock device. The walkthrough will simulate gestures automatically.
-                </p>
-              `}
-          <button class="button primary" @click="${this._startWalkthrough}">
-            Start Walkthrough
-          </button>
-        </div>
-      `;
-    }
-
     if (this.walkthroughStep === 'step1-horizontal') {
+      const hasData = this.capturedPackets.length > 0;
       return html`
         <div class="section walkthrough active">
-          <h3>Step 1: Horizontal Movement (Contact)</h3>
-          <p>
-            ${this.isRealDevice
-              ? '✏️ Drag your stylus horizontally across the tablet, or click simulate to inject mock data.'
-              : '🤖 Click Simulate to inject mock data.'}
-          </p>
-          <p>This will help us identify which bytes represent the <strong>X coordinate</strong>.</p>
-          ${this._renderStepButtons('horizontal', 'Simulate Input')}
-          ${this._renderLiveAnalysis()}
-          <div class="walkthrough-progress">
-            <div class="progress-step active">1. H-Contact</div>
-            <div class="progress-step">2. V-Contact</div>
-            <div class="progress-step">3. H-Hover</div>
-            <div class="progress-step">4. V-Hover</div>
-            <div class="progress-step">5. Tilt-X</div>
-            <div class="progress-step">6. Tilt-Y</div>
-            <div class="progress-step">7. Primary Btn</div>
-            <div class="progress-step">8. Secondary Btn</div>
-            <div class="progress-step">9. Results</div>
+          <div class="step-header">
+            <h3>Step 1: Horizontal Movement (Contact)</h3>
+            <button class="icon-button" @click="${this._resetCapture}" title="Reset">🔄</button>
+            <hid-walkthrough-progress currentStep="0" totalSteps="9"></hid-walkthrough-progress>
+            <button class="icon-button" ?disabled="${!hasData}" @click="${() => this._completeManualStep('horizontal')}" title="Next Step">→</button>
           </div>
+          <div class="step-description">
+            <p>This will help us identify which bytes represent the <strong>X coordinate</strong>.</p>
+            <button class="simulate-button" ?disabled="${this.isPlaying}" @click="${() => this._playGesture('horizontal')}">
+              ${this.isPlaying ? '⏳ Simulating...' : '🤖 Simulate this data'}
+            </button>
+          </div>
+          ${this._renderLiveAnalysis()}
         </div>
       `;
     }
 
     if (this.walkthroughStep === 'step2-vertical') {
+      const hasData = this.capturedPackets.length > 0;
       return html`
         <div class="section walkthrough active">
-          <h3>Step 2: Vertical Movement (Contact)</h3>
-          ${this.isRealDevice
-            ? html`
-                <p>✏️ <strong>Drag your stylus vertically across the tablet</strong> (top to bottom).</p>
-                <p>This will help us identify which bytes represent the <strong>Y coordinate</strong>.</p>
-              `
-            : html`
-                <p>Click the button below to simulate dragging across the tablet vertically.</p>
-                <p>This will help us identify which bytes represent the <strong>Y coordinate</strong>.</p>
-              `}
-          ${this._renderStepButtons('vertical', 'Simulate Input')}
-          ${this._renderLiveAnalysis()}
-          ${this._renderAccumulatedResults()}
-          <div class="walkthrough-progress">
-            <div class="progress-step complete">1. H-Contact ✓</div>
-            <div class="progress-step active">2. V-Contact</div>
-            <div class="progress-step">3. Pressure</div>
-            <div class="progress-step">4. H-Hover</div>
-            <div class="progress-step">5. V-Hover</div>
-            <div class="progress-step">6. Tilt-X</div>
-            <div class="progress-step">7. Tilt-Y</div>
-            <div class="progress-step">8. Primary Btn</div>
-            <div class="progress-step">9. Secondary Btn</div>
-            <div class="progress-step">10. Results</div>
+          <div class="step-header">
+            <h3>Step 2: Vertical Movement (Contact)</h3>
+            <button class="icon-button" @click="${this._resetCapture}" title="Reset">🔄</button>
+            <hid-walkthrough-progress currentStep="1" totalSteps="9"></hid-walkthrough-progress>
+            <button class="icon-button" ?disabled="${!hasData}" @click="${() => this._completeManualStep('vertical')}" title="Next Step">→</button>
           </div>
+          <div class="step-description">
+            <p>This will help us identify which bytes represent the <strong>Y coordinate</strong>.</p>
+            <button class="simulate-button" ?disabled="${this.isPlaying}" @click="${() => this._playGesture('vertical')}">
+              ${this.isPlaying ? '⏳ Simulating...' : '🤖 Simulate this data'}
+            </button>
+          </div>
+          ${this._renderLiveAnalysis()}
         </div>
       `;
     }
 
     if (this.walkthroughStep === 'step3-pressure') {
+      const hasData = this.capturedPackets.length > 0;
       return html`
         <div class="section walkthrough active">
-          <h3>Step 3: Pressure Detection</h3>
-          ${this.isRealDevice
-            ? html`
-                <p>✏️ <strong>Press down with varying pressure</strong> while moving the stylus.</p>
-                <p>Start light, press harder, then release. This will help us identify which bytes represent <strong>pressure</strong>.</p>
-              `
-            : html`
-                <p>Click the button below to simulate varying pressure while dragging.</p>
-                <p>This will help us identify which bytes represent <strong>pressure</strong>.</p>
-              `}
-          ${this._renderStepButtons('pressure', 'Simulate Input')}
-          ${this._renderLiveAnalysis()}
-          ${this._renderAccumulatedResults()}
-          <div class="walkthrough-progress">
-            <div class="progress-step complete">1. H-Contact ✓</div>
-            <div class="progress-step complete">2. V-Contact ✓</div>
-            <div class="progress-step active">3. Pressure</div>
-            <div class="progress-step">4. H-Hover</div>
-            <div class="progress-step">5. V-Hover</div>
-            <div class="progress-step">6. Tilt-X</div>
-            <div class="progress-step">7. Tilt-Y</div>
-            <div class="progress-step">8. Primary Btn</div>
-            <div class="progress-step">9. Secondary Btn</div>
-            <div class="progress-step">10. Results</div>
+          <div class="step-header">
+            <h3>Step 3: Pressure Detection</h3>
+            <button class="icon-button" @click="${this._resetCapture}" title="Reset">🔄</button>
+            <hid-walkthrough-progress currentStep="2" totalSteps="9"></hid-walkthrough-progress>
+            <button class="icon-button" ?disabled="${!hasData}" @click="${() => this._completeManualStep('pressure')}" title="Next Step">→</button>
           </div>
+          <div class="step-description">
+            <p>This will help us identify which bytes represent <strong>pressure</strong>.</p>
+            <button class="simulate-button" ?disabled="${this.isPlaying}" @click="${() => this._playGesture('pressure')}">
+              ${this.isPlaying ? '⏳ Simulating...' : '🤖 Simulate this data'}
+            </button>
+          </div>
+          ${this._renderLiveAnalysis()}
         </div>
       `;
     }
 
     if (this.walkthroughStep === 'step4-hover-horizontal') {
+      const hasData = this.capturedPackets.length > 0;
       return html`
         <div class="section walkthrough active">
-          <h3>Step 4: Hover Horizontal Movement</h3>
-          ${this.isRealDevice
-            ? html`
-                <p>✏️ <strong>Hover your stylus horizontally</strong> (left to right) <strong>without touching</strong> the tablet.</p>
-                <p>This helps confirm X coordinate bytes by comparing hover vs contact data.</p>
-              `
-            : html`
-                <p>Click the button below to simulate hovering across the tablet horizontally (no pressure).</p>
-                <p>This helps confirm X coordinate bytes by comparing hover vs contact data.</p>
-              `}
-          ${this._renderStepButtons('hover-horizontal', 'Simulate Input')}
-          ${this._renderLiveAnalysis()}
-          ${this._renderAccumulatedResults()}
-          <div class="walkthrough-progress">
-            <div class="progress-step complete">1. H-Contact ✓</div>
-            <div class="progress-step complete">2. V-Contact ✓</div>
-            <div class="progress-step complete">3. Pressure ✓</div>
-            <div class="progress-step active">4. H-Hover</div>
-            <div class="progress-step">5. V-Hover</div>
-            <div class="progress-step">6. Tilt-X</div>
-            <div class="progress-step">7. Tilt-Y</div>
-            <div class="progress-step">8. Primary Btn</div>
-            <div class="progress-step">9. Secondary Btn</div>
-            <div class="progress-step">10. Results</div>
+          <div class="step-header">
+            <h3>Step 4: Hover Horizontal Movement</h3>
+            <button class="icon-button" @click="${this._resetCapture}" title="Reset">🔄</button>
+            <hid-walkthrough-progress currentStep="3" totalSteps="9"></hid-walkthrough-progress>
+            <button class="icon-button" ?disabled="${!hasData}" @click="${() => this._completeManualStep('hover-horizontal')}" title="Next Step">→</button>
           </div>
+          <div class="step-description">
+            <p>This helps confirm X coordinate bytes by comparing hover vs contact data.</p>
+            <button class="simulate-button" ?disabled="${this.isPlaying}" @click="${() => this._playGesture('hover-horizontal')}">
+              ${this.isPlaying ? '⏳ Simulating...' : '🤖 Simulate this data'}
+            </button>
+          </div>
+          ${this._renderLiveAnalysis()}
         </div>
       `;
     }
 
     if (this.walkthroughStep === 'step5-hover-vertical') {
+      const hasData = this.capturedPackets.length > 0;
       return html`
         <div class="section walkthrough active">
-          <h3>Step 5: Hover Vertical Movement</h3>
-          ${this.isRealDevice
-            ? html`
-                <p>✏️ <strong>Hover your stylus vertically</strong> (top to bottom) <strong>without touching</strong> the tablet.</p>
-                <p>This confirms Y coordinate bytes by comparing hover vs contact data.</p>
-              `
-            : html`
-                <p>Click the button below to simulate hovering across the tablet vertically (no pressure).</p>
-                <p>This confirms Y coordinate bytes by comparing hover vs contact data.</p>
-              `}
-          ${this._renderStepButtons('hover-vertical', 'Simulate Input')}
-          ${this._renderLiveAnalysis()}
-          ${this._renderAccumulatedResults()}
-          <div class="walkthrough-progress">
-            <div class="progress-step complete">1. H-Contact ✓</div>
-            <div class="progress-step complete">2. V-Contact ✓</div>
-            <div class="progress-step complete">3. Pressure ✓</div>
-            <div class="progress-step complete">4. H-Hover ✓</div>
-            <div class="progress-step active">5. V-Hover</div>
-            <div class="progress-step">6. Tilt-X</div>
-            <div class="progress-step">7. Tilt-Y</div>
-            <div class="progress-step">8. Primary Btn</div>
-            <div class="progress-step">9. Secondary Btn</div>
-            <div class="progress-step">10. Results</div>
+          <div class="step-header">
+            <h3>Step 5: Hover Vertical Movement</h3>
+            <button class="icon-button" @click="${this._resetCapture}" title="Reset">🔄</button>
+            <hid-walkthrough-progress currentStep="4" totalSteps="9"></hid-walkthrough-progress>
+            <button class="icon-button" ?disabled="${!hasData}" @click="${() => this._completeManualStep('hover-vertical')}" title="Next Step">→</button>
           </div>
+          <div class="step-description">
+            <p>This confirms Y coordinate bytes by comparing hover vs contact data.</p>
+            <button class="simulate-button" ?disabled="${this.isPlaying}" @click="${() => this._playGesture('hover-vertical')}">
+              ${this.isPlaying ? '⏳ Simulating...' : '🤖 Simulate this data'}
+            </button>
+          </div>
+          ${this._renderLiveAnalysis()}
         </div>
       `;
     }
 
     if (this.walkthroughStep === 'step6-tilt-x') {
+      const hasData = this.capturedPackets.length > 0;
       return html`
         <div class="section walkthrough active">
-          <h3>Step 6: Tilt X Detection</h3>
-          ${this.isRealDevice
-            ? html`
-                <p>✏️ <strong>Tilt your stylus left and right</strong> while hovering or touching.</p>
-                <p>This will help us identify which byte represents <strong>X tilt</strong>.</p>
-              `
-            : html`
-                <p>Click the button below to simulate tilting the pen left and right.</p>
-                <p>This will help us identify which byte represents <strong>X tilt</strong>.</p>
-              `}
-          ${this._renderStepButtons('tilt-x', 'Simulate Input')}
-          ${this._renderLiveAnalysis()}
-          ${this._renderAccumulatedResults()}
-          <div class="walkthrough-progress">
-            <div class="progress-step complete">1. H-Contact ✓</div>
-            <div class="progress-step complete">2. V-Contact ✓</div>
-            <div class="progress-step complete">3. Pressure ✓</div>
-            <div class="progress-step complete">4. H-Hover ✓</div>
-            <div class="progress-step complete">5. V-Hover ✓</div>
-            <div class="progress-step active">6. Tilt-X</div>
-            <div class="progress-step">7. Tilt-Y</div>
-            <div class="progress-step">8. Primary Btn</div>
-            <div class="progress-step">9. Secondary Btn</div>
-            <div class="progress-step">10. Results</div>
+          <div class="step-header">
+            <h3>Step 6: Tilt X Detection</h3>
+            <button class="icon-button" @click="${this._resetCapture}" title="Reset">🔄</button>
+            <hid-walkthrough-progress currentStep="5" totalSteps="9"></hid-walkthrough-progress>
+            <button class="icon-button" ?disabled="${!hasData}" @click="${() => this._completeManualStep('tilt-x')}" title="Next Step">→</button>
           </div>
+          <div class="step-description">
+            <p>This will help us identify which byte represents <strong>X tilt</strong>.</p>
+            <button class="simulate-button" ?disabled="${this.isPlaying}" @click="${() => this._playGesture('tilt-x')}">
+              ${this.isPlaying ? '⏳ Simulating...' : '🤖 Simulate this data'}
+            </button>
+          </div>
+          ${this._renderLiveAnalysis()}
         </div>
       `;
     }
 
     if (this.walkthroughStep === 'step7-tilt-y') {
+      const hasData = this.capturedPackets.length > 0;
       return html`
         <div class="section walkthrough active">
-          <h3>Step 7: Tilt Y Detection</h3>
-          ${this.isRealDevice
-            ? html`
-                <p>✏️ <strong>Tilt your stylus forward and backward</strong> while hovering or touching.</p>
-                <p>This will help us identify which byte represents <strong>Y tilt</strong>.</p>
-              `
-            : html`
-                <p>Click the button below to simulate tilting the pen forward and backward.</p>
-                <p>This will help us identify which byte represents <strong>Y tilt</strong>.</p>
-              `}
-          ${this._renderStepButtons('tilt-y', 'Simulate Input')}
-          ${this._renderLiveAnalysis()}
-          ${this._renderAccumulatedResults()}
-          <div class="walkthrough-progress">
-            <div class="progress-step complete">1. H-Contact ✓</div>
-            <div class="progress-step complete">2. V-Contact ✓</div>
-            <div class="progress-step complete">3. Pressure ✓</div>
-            <div class="progress-step complete">4. H-Hover ✓</div>
-            <div class="progress-step complete">5. V-Hover ✓</div>
-            <div class="progress-step complete">6. Tilt-X ✓</div>
-            <div class="progress-step active">7. Tilt-Y</div>
-            <div class="progress-step">8. Primary Btn</div>
-            <div class="progress-step">9. Secondary Btn</div>
-            <div class="progress-step">10. Results</div>
+          <div class="step-header">
+            <h3>Step 7: Tilt Y Detection</h3>
+            <button class="icon-button" @click="${this._resetCapture}" title="Reset">🔄</button>
+            <hid-walkthrough-progress currentStep="6" totalSteps="9"></hid-walkthrough-progress>
+            <button class="icon-button" ?disabled="${!hasData}" @click="${() => this._completeManualStep('tilt-y')}" title="Next Step">→</button>
           </div>
+          <div class="step-description">
+            <p>This will help us identify which byte represents <strong>Y tilt</strong>.</p>
+            <button class="simulate-button" ?disabled="${this.isPlaying}" @click="${() => this._playGesture('tilt-y')}">
+              ${this.isPlaying ? '⏳ Simulating...' : '🤖 Simulate this data'}
+            </button>
+          </div>
+          ${this._renderLiveAnalysis()}
         </div>
       `;
     }
 
     if (this.walkthroughStep === 'step8-primary-button') {
+      const hasData = this.capturedPackets.length > 0;
       return html`
         <div class="section walkthrough active">
-          <h3>Step 8: Primary Button Detection</h3>
-          ${this.isRealDevice
-            ? html`
-                <p>✏️ <strong>Press and hold the primary stylus button</strong> while dragging.</p>
-                <p>This will help us identify the status byte value for <strong>primary button</strong>.</p>
-              `
-            : html`
-                <p>Click the button below to simulate dragging with the primary stylus button pressed.</p>
-                <p>This will help us identify the status byte value for <strong>primary button</strong>.</p>
-              `}
-          ${this._renderStepButtons('primary-button', 'Simulate Input')}
-          ${this._renderLiveAnalysis()}
-          ${this._renderAccumulatedResults()}
-          <div class="walkthrough-progress">
-            <div class="progress-step complete">1. H-Contact ✓</div>
-            <div class="progress-step complete">2. V-Contact ✓</div>
-            <div class="progress-step complete">3. Pressure ✓</div>
-            <div class="progress-step complete">4. H-Hover ✓</div>
-            <div class="progress-step complete">5. V-Hover ✓</div>
-            <div class="progress-step complete">6. Tilt-X ✓</div>
-            <div class="progress-step complete">7. Tilt-Y ✓</div>
-            <div class="progress-step active">8. Primary Btn</div>
-            <div class="progress-step">9. Secondary Btn</div>
-            <div class="progress-step">10. Results</div>
+          <div class="step-header">
+            <h3>Step 8: Primary Button Detection</h3>
+            <button class="icon-button" @click="${this._resetCapture}" title="Reset">🔄</button>
+            <hid-walkthrough-progress currentStep="7" totalSteps="9"></hid-walkthrough-progress>
+            <button class="icon-button" ?disabled="${!hasData}" @click="${() => this._completeManualStep('primary-button')}" title="Next Step">→</button>
           </div>
+          <div class="step-description">
+            <p>This will help us identify the status byte value for <strong>primary button</strong>.</p>
+            <button class="simulate-button" ?disabled="${this.isPlaying}" @click="${() => this._playGesture('primary-button')}">
+              ${this.isPlaying ? '⏳ Simulating...' : '🤖 Simulate this data'}
+            </button>
+          </div>
+          ${this._renderLiveAnalysis()}
         </div>
       `;
     }
 
     if (this.walkthroughStep === 'step9-secondary-button') {
+      const hasData = this.capturedPackets.length > 0;
       return html`
         <div class="section walkthrough active">
-          <h3>Step 9: Secondary Button Detection</h3>
-          ${this.isRealDevice
-            ? html`
-                <p>✏️ <strong>Press and hold the secondary stylus button</strong> while dragging.</p>
-                <p>This will help us identify the status byte value for <strong>secondary button</strong>.</p>
-              `
-            : html`
-                <p>Click the button below to simulate dragging with the secondary stylus button pressed.</p>
-                <p>This will help us identify the status byte value for <strong>secondary button</strong>.</p>
-              `}
-          ${this._renderStepButtons('secondary-button', 'Simulate Input')}
-          ${this._renderLiveAnalysis()}
-          ${this._renderAccumulatedResults()}
-          <div class="walkthrough-progress">
-            <div class="progress-step complete">1. H-Contact ✓</div>
-            <div class="progress-step complete">2. V-Contact ✓</div>
-            <div class="progress-step complete">3. Pressure ✓</div>
-            <div class="progress-step complete">4. H-Hover ✓</div>
-            <div class="progress-step complete">5. V-Hover ✓</div>
-            <div class="progress-step complete">6. Tilt-X ✓</div>
-            <div class="progress-step complete">7. Tilt-Y ✓</div>
-            <div class="progress-step complete">8. Primary Btn ✓</div>
-            <div class="progress-step active">9. Secondary Btn</div>
-            <div class="progress-step">10. Results</div>
+          <div class="step-header">
+            <h3>Step 9: Secondary Button Detection</h3>
+            <button class="icon-button" @click="${this._resetCapture}" title="Reset">🔄</button>
+            <hid-walkthrough-progress currentStep="8" totalSteps="9"></hid-walkthrough-progress>
+            <button class="icon-button" ?disabled="${!hasData}" @click="${() => this._completeManualStep('secondary-button')}" title="Next Step">→</button>
           </div>
+          <div class="step-description">
+            <p>This will help us identify the status byte value for <strong>secondary button</strong>.</p>
+            <button class="simulate-button" ?disabled="${this.isPlaying}" @click="${() => this._playGesture('secondary-button')}">
+              ${this.isPlaying ? '⏳ Simulating...' : '🤖 Simulate this data'}
+            </button>
+          </div>
+          ${this._renderLiveAnalysis()}
         </div>
       `;
     }
 
     if (this.walkthroughStep === 'complete') {
       return html`
-        <div class="section walkthrough complete">
-          <h3>✅ Analysis Complete!</h3>
+        <div class="section walkthrough active">
+          <div class="step-header">
+            <h3>✅ Analysis Complete!</h3>
+            <button class="icon-button" @click="${this._resetCapture}" title="Reset">🔄</button>
+            <hid-walkthrough-progress currentStep="9" totalSteps="9"></hid-walkthrough-progress>
+            <button class="icon-button" disabled title="Next Step">→</button>
+          </div>
           <p>We've identified which bytes represent coordinates, pressure, tilt, and button states in the HID data.</p>
-          ${this.isRealDevice && this.activeDeviceIndices.size > 0 ? html`
-            <div class="info-message" style="background: #e8f5e9; border-left-color: #4caf50; color: #2e7d32;">
-              <strong>📱 Device Detection:</strong>
-              ${this.activeDeviceIndices.size === 1
-                ? html`Stylus data detected from <strong>Device ${Array.from(this.activeDeviceIndices)[0]}</strong>`
-                : html`Stylus data detected from <strong>Devices ${Array.from(this.activeDeviceIndices).join(', ')}</strong>`
-              }
-              ${this._renderActiveDeviceInfo()}
-            </div>
-          ` : ''}
-
           ${this._renderLiveAnalysis()}
 
-          <div class="walkthrough-progress">
-            <div class="progress-step complete">1. H-Contact ✓</div>
-            <div class="progress-step complete">2. V-Contact ✓</div>
-            <div class="progress-step complete">3. H-Hover ✓</div>
-            <div class="progress-step complete">4. V-Hover ✓</div>
-            <div class="progress-step complete">5. Tilt-X ✓</div>
-            <div class="progress-step complete">6. Tilt-Y ✓</div>
-            <div class="progress-step complete">7. Primary Btn ✓</div>
-            <div class="progress-step complete">8. Secondary Btn ✓</div>
-            <div class="progress-step complete">9. Results ✓</div>
-          </div>
-
-          ${this.deviceConfig ? html`
-            <div class="config-actions-only">
-              <button class="button" @click="${this._copyConfig}">
-                📋 Copy JSON
-              </button>
-              <button class="button" @click="${this._downloadConfig}">
-                💾 Download Config
-              </button>
-            </div>
-          ` : ''}
-
-          <button class="button" @click="${this._resetWalkthrough}">
-            Start Over
-          </button>
+          ${this._renderConfigPanel()}
         </div>
       `;
     }
@@ -1293,149 +1126,25 @@ export class HidDataReader extends LitElement {
     this.byteCount = 0;
   }
 
-  private _startWalkthrough() {
-    this.walkthroughStep = 'step1-horizontal';
-    this.horizontalBytes = [];
-    this.verticalBytes = [];
-    this.hoverHorizontalBytes = [];
-    this.hoverVerticalBytes = [];
-    this.pressureBytes = [];
-    this.tiltXBytes = [];
-    this.tiltYBytes = [];
-    this.capturedPackets = [];
-    this.activeDeviceIndices.clear();
-    this._clearBytes();
-  }
-
-  private _renderAccumulatedResults() {
-    const results: any[] = [];
-
-    // Step 1: Horizontal bytes
-    if (this.horizontalBytes.length > 0) {
-      results.push({
-        title: '↔️ Horizontal Movement (Contact)',
-        bytes: this.horizontalBytes,
-        description: 'Bytes that changed during horizontal drag'
-      });
-    }
-
-    // Step 2: Vertical bytes
-    if (this.verticalBytes.length > 0) {
-      results.push({
-        title: '↕️ Vertical Movement (Contact)',
-        bytes: this.verticalBytes,
-        description: 'Bytes that changed during vertical drag'
-      });
-    }
-
-    // Step 3: Hover horizontal bytes
-    if (this.hoverHorizontalBytes.length > 0) {
-      results.push({
-        title: '↔️ Horizontal Hover (No Pressure)',
-        bytes: this.hoverHorizontalBytes,
-        description: 'Bytes that changed during horizontal hover'
-      });
-    }
-
-    // Step 4: Hover vertical bytes
-    if (this.hoverVerticalBytes.length > 0) {
-      results.push({
-        title: '↕️ Vertical Hover (No Pressure)',
-        bytes: this.hoverVerticalBytes,
-        description: 'Bytes that changed during vertical hover'
-      });
-    }
-
-    // Step 5: Tilt X bytes
-    if (this.tiltXBytes.length > 0) {
-      results.push({
-        title: '↔️ Tilt X',
-        bytes: this.tiltXBytes,
-        description: 'Bytes that changed during X tilt'
-      });
-    }
-
-    // Step 6: Tilt Y bytes
-    if (this.tiltYBytes.length > 0) {
-      results.push({
-        title: '↕️ Tilt Y',
-        bytes: this.tiltYBytes,
-        description: 'Bytes that changed during Y tilt'
-      });
-    }
-
-    // Step 7 & 8: Status byte values
-    const statusValues = Array.from(this.statusByteValues.entries());
-    if (statusValues.length > 0) {
-      results.push({
-        title: '🔘 Status Byte Values',
-        statusValues: statusValues,
-        description: 'Status byte values for different pen states'
-      });
-    }
-
-    if (results.length === 0) {
-      return html``;
-    }
-
-    return html`
-      <div class="section accumulated-results">
-        <h3>📊 Discovered So Far</h3>
-        ${results.map(result => html`
-          <div class="result-item">
-            <h4>${result.title}</h4>
-            <p class="result-description">${result.description}</p>
-            ${result.bytes ? html`
-              <div class="byte-results">
-                ${result.bytes.map((byte: any) => html`
-                  <div class="byte-result-card">
-                    <div class="byte-index">Byte ${byte.byteIndex + 1}</div>
-                    <div class="byte-range">
-                      <span class="range-label">Range:</span>
-                      <span class="range-value">${byte.min} - ${byte.max}</span>
-                    </div>
-                    <div class="byte-variance">
-                      <span class="variance-label">Variance:</span>
-                      <span class="variance-value">${byte.variance.toFixed(2)}</span>
-                    </div>
-                  </div>
-                `)}
-              </div>
-            ` : ''}
-            ${result.statusValues ? html`
-              <div class="status-values">
-                ${result.statusValues.map(([byteValue, info]: [number, any]) => html`
-                  <div class="status-value-card">
-                    <span class="status-state">${info.state}:</span>
-                    <span class="status-value">${byteValue} (0x${byteValue.toString(16).toUpperCase().padStart(2, '0')})</span>
-                  </div>
-                `)}
-              </div>
-            ` : ''}
-          </div>
-        `)}
-      </div>
-    `;
-  }
 
   private _getByteLabel(byteIndex: number): string | null {
     // Return the best guess label for what this byte represents
     // Based on what we've discovered so far in the walkthrough
 
-    // Check X coordinate (confirmed from hover horizontal, or tentative from contact horizontal)
+    // Check X coordinate (from hover horizontal or contact horizontal)
     if (this.hoverHorizontalBytes.some(b => b.byteIndex === byteIndex)) {
       return 'X';
     }
-    if (this.horizontalBytes.some(b => b.byteIndex === byteIndex) && this.hoverHorizontalBytes.length === 0) {
-      return 'X?'; // Tentative until confirmed by hover test
+    if (this.horizontalBytes.some(b => b.byteIndex === byteIndex)) {
+      return 'X';
     }
 
-    // Check Y coordinate (confirmed from hover vertical, or tentative from contact vertical)
+    // Check Y coordinate (from hover vertical or contact vertical)
     if (this.hoverVerticalBytes.some(b => b.byteIndex === byteIndex)) {
       return 'Y';
     }
-    if (this.verticalBytes.some(b => b.byteIndex === byteIndex) && this.hoverVerticalBytes.length === 0) {
-      return 'Y?'; // Tentative until confirmed by hover test
+    if (this.verticalBytes.some(b => b.byteIndex === byteIndex)) {
+      return 'Y';
     }
 
     // Check pressure (from step 3)
@@ -1469,18 +1178,16 @@ export class HidDataReader extends LitElement {
   }
 
   private _renderLiveAnalysis() {
-    // Show live analysis whenever we have captured packets
-    // Use current packets if in a step, otherwise use last captured packets
-    const isInWalkthroughStep = this.walkthroughStep !== 'idle' && this.walkthroughStep !== 'complete';
-    const packetsToShow = isInWalkthroughStep && this.capturedPackets.length > 0
+    // Always show live analysis section
+    // Use current packets if available, otherwise use last captured packets
+    const packetsToShow = this.capturedPackets.length > 0
       ? this.capturedPackets
       : this.lastCapturedPackets;
 
     if (packetsToShow.length === 0) {
-      return html``;
+      // Show empty placeholder cells (typical HID packet has 9 bytes)
+      return html`<bytes-display .isEmpty=${true} .placeholderCount=${9}></bytes-display>`;
     }
-
-    const titleSuffix = isInWalkthroughStep ? ' (Live)' : '';
 
     // Get the latest packet
     const latestPacket = packetsToShow[packetsToShow.length - 1];
@@ -1525,46 +1232,86 @@ export class HidDataReader extends LitElement {
     // Create a map of byte index to analysis data
     const analysisMap = new Map(analysis.map(a => [a.byteIndex, a]));
 
-    return html`
-      <div class="live-analysis">
-        <h4>📊 Live Analysis${titleSuffix}</h4>
-        <p class="analysis-subtitle">${packetsToShow.length} packet${packetsToShow.length !== 1 ? 's' : ''} captured</p>
-        <div class="live-bytes-grid">
-          ${Array.from(latestPacket).map((value, byteIndex) => {
-            const isBestGuess = bestGuessIndices.has(byteIndex);
-            const analysisData = analysisMap.get(byteIndex);
-            const byteLabel = this._getByteLabel(byteIndex);
+    // Compute real-time best guess labels for current step
+    const realtimeLabels = this._getRealtimeBestGuessLabels(bestGuessBytes);
 
-            return html`
-              <div class="live-byte-cell ${isBestGuess ? 'best-guess' : ''} ${byteLabel ? 'identified' : ''}">
-                ${byteLabel ? html`<div class="byte-type-label">${byteLabel}</div>` : ''}
-                <div class="byte-label">Byte ${byteIndex + 1}</div>
-                <div class="byte-value">${value}</div>
-                <div class="byte-hex">0x${value.toString(16).toUpperCase().padStart(2, '0')}</div>
-                ${analysisData ? html`
-                  <div class="byte-meta">
-                    <div class="meta-line">R: ${analysisData.min}-${analysisData.max}</div>
-                    <div class="meta-line">V: ${analysisData.variance.toFixed(1)}</div>
-                  </div>
-                ` : html`
-                  <div class="byte-meta">
-                    <div class="meta-line">-</div>
-                  </div>
-                `}
-              </div>
-            `;
-          })}
-        </div>
-      </div>
-    `;
+    // Build byte data array for the bytes-display component
+    const bytesData: {
+      byteIndex: number;
+      value: number;
+      min: number | undefined;
+      max: number | undefined;
+      variance: number | undefined;
+      isBestGuess: boolean;
+      isIdentified: boolean;
+      label: string | null
+    }[] = Array.from(latestPacket).map((value, byteIndex) => {
+      const isBestGuess = bestGuessIndices.has(byteIndex);
+      const analysisData = analysisMap.get(byteIndex);
+      const byteLabel = this._getByteLabel(byteIndex) || realtimeLabels.get(byteIndex) || null;
+
+      return {
+        byteIndex,
+        value,
+        min: analysisData?.min,
+        max: analysisData?.max,
+        variance: analysisData?.variance,
+        isBestGuess,
+        isIdentified: !!byteLabel,
+        label: byteLabel
+      };
+    });
+
+    return html`<bytes-display .bytes=${bytesData}></bytes-display>`;
+  }
+
+  private _getRealtimeBestGuessLabels(bestGuessBytes: ByteAnalysis[]): Map<number, string> {
+    const labels = new Map<number, string>();
+
+    // Only show real-time labels if we're actively capturing and don't have confirmed bytes yet
+    if (this.capturedPackets.length === 0) return labels;
+
+    // Step 1: Horizontal movement - label as X
+    if (this.walkthroughStep === 'step1-horizontal' && this.horizontalBytes.length === 0) {
+      bestGuessBytes.slice(0, 2).forEach(byte => labels.set(byte.byteIndex, 'X'));
+    }
+
+    // Step 2: Vertical movement - label as Y
+    if (this.walkthroughStep === 'step2-vertical' && this.verticalBytes.length === 0) {
+      bestGuessBytes.slice(0, 2).forEach(byte => labels.set(byte.byteIndex, 'Y'));
+    }
+
+    // Step 3: Pressure - label as Pressure
+    if (this.walkthroughStep === 'step3-pressure' && this.pressureBytes.length === 0) {
+      bestGuessBytes.slice(0, 2).forEach(byte => labels.set(byte.byteIndex, 'Pressure'));
+    }
+
+    // Step 4: Hover horizontal - label as X
+    if (this.walkthroughStep === 'step4-hover-horizontal' && this.hoverHorizontalBytes.length === 0) {
+      bestGuessBytes.slice(0, 2).forEach(byte => labels.set(byte.byteIndex, 'X'));
+    }
+
+    // Step 5: Hover vertical - label as Y
+    if (this.walkthroughStep === 'step5-hover-vertical' && this.hoverVerticalBytes.length === 0) {
+      bestGuessBytes.slice(0, 2).forEach(byte => labels.set(byte.byteIndex, 'Y'));
+    }
+
+    // Step 6: Tilt X - label as Tilt-X
+    if (this.walkthroughStep === 'step6-tilt-x' && this.tiltXBytes.length === 0) {
+      if (bestGuessBytes.length > 0) labels.set(bestGuessBytes[0].byteIndex, 'Tilt-X');
+    }
+
+    // Step 7: Tilt Y - label as Tilt-Y
+    if (this.walkthroughStep === 'step7-tilt-y' && this.tiltYBytes.length === 0) {
+      if (bestGuessBytes.length > 0) labels.set(bestGuessBytes[0].byteIndex, 'Tilt-Y');
+    }
+
+    return labels;
   }
 
   private _renderStepButtons(gesture: string, mockLabel: string) {
     return html`
       <div class="step-buttons">
-        <p class="info-message" style="background: #fff3cd; border-left-color: #ffc107; color: #856404;">
-          📝 Recording... ${this.isRealDevice ? 'Use your tablet or simulate' : 'Click simulate to generate data'}.
-        </p>
         <div class="button-group">
           <button
             class="button secondary"
@@ -1595,7 +1342,7 @@ export class HidDataReader extends LitElement {
   }
 
   private _resetWalkthrough() {
-    this.walkthroughStep = 'idle';
+    this.walkthroughStep = 'step1-horizontal';
     this.horizontalBytes = [];
     this.verticalBytes = [];
     this.tiltXBytes = [];
@@ -1605,11 +1352,12 @@ export class HidDataReader extends LitElement {
     this.pressureBytes = [];
     this.deviceConfig = null;
     this.capturedPackets = [];
+    this.lastCapturedPackets = [];
     this.statusByteValues.clear();
     this._clearBytes();
   }
 
-  private _getConfigWithMetadata(): string {
+  private _getConfigMetadata(): string {
     if (!this.deviceConfig) return '';
 
     let output = '';
@@ -1636,39 +1384,28 @@ export class HidDataReader extends LitElement {
       output += '//\n';
     }
 
-    output += JSON.stringify(this.deviceConfig, null, 2);
     return output;
   }
 
-  private async _copyConfig() {
-    if (!this.deviceConfig) return;
+  private _renderConfigPanel() {
+    if (!this.deviceConfig) return '';
 
-    const configText = this._getConfigWithMetadata();
+    const metadata = this._getConfigMetadata();
 
-    try {
-      await navigator.clipboard.writeText(configText);
-      alert('Configuration copied to clipboard!');
-    } catch (err) {
-      console.error('Failed to copy:', err);
-      alert('Failed to copy to clipboard. Please try again.');
-    }
+    return html`
+      <div class="config-panel">
+        <div class="config-panel-header" @click="${() => this.isConfigPanelExpanded = !this.isConfigPanelExpanded}">
+          <h4>📄 Device Configuration</h4>
+          <span class="collapse-icon">${this.isConfigPanelExpanded ? '▼' : '▶'}</span>
+        </div>
+        ${this.isConfigPanelExpanded ? html`
+          <hid-json-config .config=${this.deviceConfig} .metadata=${metadata}></hid-json-config>
+        ` : ''}
+      </div>
+    `;
   }
 
-  private _downloadConfig() {
-    if (!this.deviceConfig) return;
 
-    const configText = this._getConfigWithMetadata();
-    const blob = new Blob([configText], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = 'device-byte-mappings.json';
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
-  }
 }
 
 declare global {
