@@ -1,0 +1,163 @@
+/**
+ * Metadata Generation Utilities
+ * 
+ * This module contains utilities for generating device configuration metadata
+ * from detected byte mappings and WebHID device information.
+ */
+
+import type { DeviceByteCodeMappings } from './byte-detector.js';
+import type { ConfigData } from '../models/config.js';
+
+export interface DeviceMetadata {
+  vendorId?: number;
+  productId?: number;
+  productName?: string;
+  collections?: Array<{ usagePage: number; usage: number }>;
+  allInterfaces?: number[];
+  detectedReportId?: number;
+}
+
+export interface UserProvidedMetadata {
+  name: string;
+  manufacturer: string;
+  model: string;
+  description: string;
+  buttonCount: number;
+}
+
+/**
+ * Infer device capabilities from detected byte mappings
+ */
+export function inferCapabilities(
+  byteCodeMappings: DeviceByteCodeMappings
+): ConfigData['capabilities'] {
+  const hasPressure = !!byteCodeMappings.pressure;
+  const hasTilt = !!(byteCodeMappings.tiltX || byteCodeMappings.tiltY);
+  
+  // Calculate pressure levels from max value (round to nearest power of 2)
+  let pressureLevels = 8192; // default
+  if (byteCodeMappings.pressure?.max) {
+    const max = byteCodeMappings.pressure.max;
+    // Find nearest power of 2
+    pressureLevels = Math.pow(2, Math.round(Math.log2(max + 1)));
+  }
+
+  // Use max values as resolution
+  const resolutionX = byteCodeMappings.x.max || 16000;
+  const resolutionY = byteCodeMappings.y.max || 9000;
+
+  return {
+    hasButtons: false, // Will be set based on user input
+    buttonCount: 0, // Will be set based on user input
+    hasPressure,
+    pressureLevels,
+    hasTilt,
+    resolution: {
+      x: resolutionX,
+      y: resolutionY,
+    },
+  };
+}
+
+/**
+ * Detect the digitizer usage page from device collections
+ */
+export function detectDigitizerUsagePage(
+  collections?: Array<{ usagePage: number; usage: number }>
+): number {
+  if (!collections || collections.length === 0) {
+    return 13; // Default digitizer usage page
+  }
+
+  // Find the digitizer collection (usage page 13, usage 2 = pen)
+  const digitizer = collections.find(c => c.usagePage === 13 && c.usage === 2);
+  if (digitizer) {
+    return digitizer.usagePage;
+  }
+
+  // Fallback to first collection's usage page
+  return collections[0].usagePage;
+}
+
+/**
+ * Detect the stylus mode status byte from status byte values
+ * This is typically the "hover" state value
+ */
+export function detectStylusModeStatusByte(
+  byteCodeMappings: DeviceByteCodeMappings
+): number | undefined {
+  if (!byteCodeMappings.status?.values) {
+    return undefined;
+  }
+
+  // Find the status code for "hover" state
+  for (const [code, value] of Object.entries(byteCodeMappings.status.values)) {
+    if (value.state === 'hover' && !value.primaryButtonPressed && !value.secondaryButtonPressed) {
+      return parseInt(code, 10);
+    }
+  }
+
+  return undefined;
+}
+
+/**
+ * Detect excluded usage pages (non-digitizer interfaces)
+ */
+export function detectExcludedUsagePages(
+  allInterfaces?: number[],
+  digitizerUsagePage?: number
+): number[] {
+  if (!allInterfaces || allInterfaces.length === 0) {
+    return [];
+  }
+
+  const digUsagePage = digitizerUsagePage || 13;
+  
+  // Exclude all interfaces that are not the digitizer
+  return allInterfaces.filter(up => up !== digUsagePage);
+}
+
+/**
+ * Generate complete device configuration from all available data
+ */
+export function generateCompleteConfig(
+  deviceMetadata: DeviceMetadata,
+  userMetadata: UserProvidedMetadata,
+  byteCodeMappings: DeviceByteCodeMappings
+): any {
+  const capabilities = inferCapabilities(byteCodeMappings);
+  const digitizerUsagePage = detectDigitizerUsagePage(deviceMetadata.collections);
+  const stylusModeStatusByte = detectStylusModeStatusByte(byteCodeMappings);
+  const excludedUsagePages = detectExcludedUsagePages(
+    deviceMetadata.allInterfaces,
+    digitizerUsagePage
+  );
+
+  // Update capabilities with user-provided button info
+  capabilities.hasButtons = userMetadata.buttonCount > 0;
+  capabilities.buttonCount = userMetadata.buttonCount;
+
+  return {
+    name: userMetadata.name,
+    manufacturer: userMetadata.manufacturer,
+    model: userMetadata.model,
+    description: userMetadata.description,
+    vendorId: deviceMetadata.vendorId ? `0x${deviceMetadata.vendorId.toString(16)}` : '0x0000',
+    productId: deviceMetadata.productId ? `0x${deviceMetadata.productId.toString(16)}` : '0x0000',
+    deviceInfo: {
+      vendor_id: deviceMetadata.vendorId || 0,
+      product_id: deviceMetadata.productId || 0,
+      product_string: deviceMetadata.productName || '',
+      usage_page: deviceMetadata.collections?.[0]?.usagePage || 13,
+      usage: deviceMetadata.collections?.[0]?.usage || 2,
+      interfaces: deviceMetadata.allInterfaces || [],
+    },
+    reportId: deviceMetadata.detectedReportId || 0,
+    digitizerUsagePage,
+    ...(stylusModeStatusByte !== undefined && { stylusModeStatusByte }),
+    ...(excludedUsagePages.length > 0 && { excludedUsagePages }),
+    capabilities,
+    byteCodeMappings,
+  };
+}
+

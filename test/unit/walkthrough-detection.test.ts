@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { analyzeBytes, getBestGuessBytesByVariance, generateDeviceConfig } from '../../src/utils/byte-detector.js';
+import { inferCapabilities } from '../../src/utils/metadata-generator.js';
 import { TabletDataGenerator } from '../../src/mockbytes/tablet-data-generator.js';
 import { readFileSync } from 'fs';
 import { join } from 'path';
@@ -349,6 +350,136 @@ describe('Walkthrough Byte Detection', () => {
       expect(statusValues['163']).toEqual({ state: 'contact', secondaryButtonPressed: true });
       expect(statusValues['164']).toEqual({ state: 'hover', primaryButtonPressed: true });
       expect(statusValues['165']).toEqual({ state: 'contact', primaryButtonPressed: true });
+    });
+
+    it('should infer device capabilities from detected byte mappings', () => {
+      // Simulate all walkthrough steps to collect data
+      const horizontalPackets = collectPackets(
+        generator.generateLineConstantPressure(0, 0.5, 1, 0.5, 0.5, 1500),
+        350
+      );
+      const verticalPackets = collectPackets(
+        generator.generateLineConstantPressure(0.5, 0, 0.5, 1, 0.5, 1500),
+        350
+      );
+      const pressurePackets = collectPackets(
+        generator.generateLine(0.5, 0.5, 0.5, 0.5, 1500),
+        350
+      );
+      const hoverHorizontalPackets = collectPackets(
+        generator.generateHoverLine(0, 0.5, 1, 0.5, 1500),
+        350
+      );
+      const hoverVerticalPackets = collectPackets(
+        generator.generateHoverLine(0.5, 0, 0.5, 1, 1500),
+        350
+      );
+      const tiltXPackets = collectPackets(
+        generator.generateTiltXLine(0.5, 0.5, 0.5, 0.5, 1500),
+        350
+      );
+      const tiltYPackets = collectPackets(
+        generator.generateTiltYLine(0.5, 0.5, 0.5, 0.5, 1500),
+        350
+      );
+      const primaryButtonPackets = collectPackets(
+        generator.generatePrimaryButtonLine(0, 0.5, 1, 0.5, 1500),
+        350
+      );
+      const secondaryButtonPackets = collectPackets(
+        generator.generateSecondaryButtonLine(0, 0.5, 1, 0.5, 1500),
+        350
+      );
+
+      // Detect bytes for each step
+      const horizontalAnalysis = analyzeBytes(horizontalPackets);
+      const filteredHorizontal = horizontalAnalysis.filter(b => b.byteIndex !== 0);
+      const horizontalBytes = getBestGuessBytesByVariance(filteredHorizontal, 2);
+
+      const verticalAnalysis = analyzeBytes(verticalPackets);
+      const filteredVertical = verticalAnalysis.filter(b => ![0, 1, 2].includes(b.byteIndex));
+      const verticalBytes = getBestGuessBytesByVariance(filteredVertical, 2);
+
+      const pressureAnalysis = analyzeBytes(pressurePackets);
+      const filteredPressure = pressureAnalysis.filter(b => ![0, 1, 2, 3, 4].includes(b.byteIndex));
+      const pressureBytes = getBestGuessBytesByVariance(filteredPressure, 2);
+
+      const tiltXAnalysis = analyzeBytes(tiltXPackets);
+      const filteredTiltX = tiltXAnalysis.filter(b => ![0, 1, 2, 3, 4, 5, 6].includes(b.byteIndex));
+      const tiltXBytes = getBestGuessBytesByVariance(filteredTiltX, 1);
+
+      const tiltYAnalysis = analyzeBytes(tiltYPackets);
+      const filteredTiltY = tiltYAnalysis.filter(b => ![0, 1, 2, 3, 4, 5, 6, 7].includes(b.byteIndex));
+      const tiltYBytes = getBestGuessBytesByVariance(filteredTiltY, 1);
+
+      // Collect all packets
+      const allPackets = [
+        ...horizontalPackets,
+        ...verticalPackets,
+        ...pressurePackets,
+        ...hoverHorizontalPackets,
+        ...hoverVerticalPackets,
+        ...tiltXPackets,
+        ...tiltYPackets,
+        ...primaryButtonPackets,
+        ...secondaryButtonPackets,
+      ];
+
+      // Track status byte values
+      const statusByteValues = new Map();
+      const statusByteIndex = 0;
+
+      allPackets.forEach(packet => {
+        const statusByte = packet[statusByteIndex];
+        if (statusByteValues.has(statusByte)) return;
+
+        const allZeros = packet.slice(1).every(b => b === 0);
+        if (allZeros) {
+          statusByteValues.set(statusByte, { state: 'none' });
+        } else if (statusByte === 0xa0) {
+          statusByteValues.set(statusByte, { state: 'hover' });
+        } else if (statusByte === 0xa1) {
+          statusByteValues.set(statusByte, { state: 'contact' });
+        } else if (statusByte === 0xa2) {
+          statusByteValues.set(statusByte, { state: 'hover', secondaryButtonPressed: true });
+        } else if (statusByte === 0xa3) {
+          statusByteValues.set(statusByte, { state: 'contact', secondaryButtonPressed: true });
+        } else if (statusByte === 0xa4) {
+          statusByteValues.set(statusByte, { state: 'hover', primaryButtonPressed: true });
+        } else if (statusByte === 0xa5) {
+          statusByteValues.set(statusByte, { state: 'contact', primaryButtonPressed: true });
+        }
+      });
+
+      // Generate configuration
+      const generatedConfig = generateDeviceConfig(
+        horizontalBytes,
+        verticalBytes,
+        pressureBytes,
+        tiltXBytes,
+        tiltYBytes,
+        statusByteValues,
+        allPackets
+      );
+
+      // Infer capabilities from the generated config
+      const capabilities = inferCapabilities(generatedConfig);
+
+      // Verify auto-detected capabilities
+      expect(capabilities.hasPressure).toBe(true);
+      expect(capabilities.hasTilt).toBe(true);
+
+      // Pressure levels should be a power of 2 based on the detected max
+      expect(capabilities.pressureLevels).toBeGreaterThan(0);
+      expect(Math.log2(capabilities.pressureLevels) % 1).toBe(0); // Should be a power of 2
+
+      // Resolution should match the detected max values
+      expect(capabilities.resolution.x).toBeGreaterThan(0);
+      expect(capabilities.resolution.y).toBeGreaterThan(0);
+
+      // These are user-provided, so they should be defaults
+      expect(capabilities.hasButtons).toBe(false);
+      expect(capabilities.buttonCount).toBe(0);
     });
   });
 });

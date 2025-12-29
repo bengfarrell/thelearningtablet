@@ -14,12 +14,19 @@ import {
   type CoordinateConfig,
   type TiltConfig,
 } from '../../utils/byte-detector.js';
+import {
+  generateCompleteConfig,
+  type DeviceMetadata,
+  type UserProvidedMetadata,
+} from '../../utils/metadata-generator.js';
 import '../bytes-display/bytes-display.js';
 import type { ByteData } from '../bytes-display/bytes-display.js';
 import '../hid-json-config/hid-json-config.js';
 import '../hid-walkthrough-progress/hid-walkthrough-progress.js';
+import '../device-metadata-form/device-metadata-form.js';
+import type { MetadataFormData } from '../device-metadata-form/device-metadata-form.js';
 
-type WalkthroughStep = 'idle' | 'step1-horizontal' | 'step2-vertical' | 'step3-pressure' | 'step4-hover-horizontal' | 'step5-hover-vertical' | 'step6-tilt-x' | 'step7-tilt-y' | 'step8-primary-button' | 'step9-secondary-button' | 'complete';
+type WalkthroughStep = 'idle' | 'step1-horizontal' | 'step2-vertical' | 'step3-pressure' | 'step4-hover-horizontal' | 'step5-hover-vertical' | 'step6-tilt-x' | 'step7-tilt-y' | 'step8-primary-button' | 'step9-secondary-button' | 'step10-metadata' | 'complete';
 
 /**
  * HID Data Reader component for visualizing raw HID bytes
@@ -81,6 +88,9 @@ export class HidDataReader extends LitElement {
   private isConnecting = false;
 
   @state()
+  private completeConfig: any = null;
+
+  @state()
   private deviceDataStreams: Map<number, { lastPacket: string; packetCount: number; lastUpdate: number }> = new Map();
 
   private mockDevice?: MockTabletDevice;
@@ -98,6 +108,16 @@ export class HidDataReader extends LitElement {
 
   // Track which devices sent data during walkthrough
   private activeDeviceIndices: Set<number> = new Set();
+
+  // Store device metadata for configuration generation
+  private deviceMetadata: {
+    vendorId?: number;
+    productId?: number;
+    productName?: string;
+    collections?: Array<{ usagePage: number; usage: number }>;
+    allInterfaces?: number[];
+    detectedReportId?: number;
+  } = {};
 
   connectedCallback() {
     super.connectedCallback();
@@ -286,7 +306,7 @@ export class HidDataReader extends LitElement {
           <div class="step-header">
             <h3>Step 1: Horizontal Movement (Contact)</h3>
             <button class="icon-button" @click="${this._resetCapture}" title="Reset">🔄</button>
-            <hid-walkthrough-progress currentStep="0" totalSteps="9"></hid-walkthrough-progress>
+            <hid-walkthrough-progress currentStep="0" totalSteps="10"></hid-walkthrough-progress>
             <button class="icon-button" ?disabled="${!hasData}" @click="${() => this._completeManualStep('horizontal')}" title="Next Step">→</button>
           </div>
           <div class="step-description">
@@ -307,7 +327,7 @@ export class HidDataReader extends LitElement {
           <div class="step-header">
             <h3>Step 2: Vertical Movement (Contact)</h3>
             <button class="icon-button" @click="${this._resetCapture}" title="Reset">🔄</button>
-            <hid-walkthrough-progress currentStep="1" totalSteps="9"></hid-walkthrough-progress>
+            <hid-walkthrough-progress currentStep="1" totalSteps="10"></hid-walkthrough-progress>
             <button class="icon-button" ?disabled="${!hasData}" @click="${() => this._completeManualStep('vertical')}" title="Next Step">→</button>
           </div>
           <div class="step-description">
@@ -328,7 +348,7 @@ export class HidDataReader extends LitElement {
           <div class="step-header">
             <h3>Step 3: Pressure Detection</h3>
             <button class="icon-button" @click="${this._resetCapture}" title="Reset">🔄</button>
-            <hid-walkthrough-progress currentStep="2" totalSteps="9"></hid-walkthrough-progress>
+            <hid-walkthrough-progress currentStep="2" totalSteps="10"></hid-walkthrough-progress>
             <button class="icon-button" ?disabled="${!hasData}" @click="${() => this._completeManualStep('pressure')}" title="Next Step">→</button>
           </div>
           <div class="step-description">
@@ -349,7 +369,7 @@ export class HidDataReader extends LitElement {
           <div class="step-header">
             <h3>Step 4: Hover Horizontal Movement</h3>
             <button class="icon-button" @click="${this._resetCapture}" title="Reset">🔄</button>
-            <hid-walkthrough-progress currentStep="3" totalSteps="9"></hid-walkthrough-progress>
+            <hid-walkthrough-progress currentStep="3" totalSteps="10"></hid-walkthrough-progress>
             <button class="icon-button" ?disabled="${!hasData}" @click="${() => this._completeManualStep('hover-horizontal')}" title="Next Step">→</button>
           </div>
           <div class="step-description">
@@ -370,7 +390,7 @@ export class HidDataReader extends LitElement {
           <div class="step-header">
             <h3>Step 5: Hover Vertical Movement</h3>
             <button class="icon-button" @click="${this._resetCapture}" title="Reset">🔄</button>
-            <hid-walkthrough-progress currentStep="4" totalSteps="9"></hid-walkthrough-progress>
+            <hid-walkthrough-progress currentStep="4" totalSteps="10"></hid-walkthrough-progress>
             <button class="icon-button" ?disabled="${!hasData}" @click="${() => this._completeManualStep('hover-vertical')}" title="Next Step">→</button>
           </div>
           <div class="step-description">
@@ -391,7 +411,7 @@ export class HidDataReader extends LitElement {
           <div class="step-header">
             <h3>Step 6: Tilt X Detection</h3>
             <button class="icon-button" @click="${this._resetCapture}" title="Reset">🔄</button>
-            <hid-walkthrough-progress currentStep="5" totalSteps="9"></hid-walkthrough-progress>
+            <hid-walkthrough-progress currentStep="5" totalSteps="10"></hid-walkthrough-progress>
             <button class="icon-button" ?disabled="${!hasData}" @click="${() => this._completeManualStep('tilt-x')}" title="Next Step">→</button>
           </div>
           <div class="step-description">
@@ -412,7 +432,7 @@ export class HidDataReader extends LitElement {
           <div class="step-header">
             <h3>Step 7: Tilt Y Detection</h3>
             <button class="icon-button" @click="${this._resetCapture}" title="Reset">🔄</button>
-            <hid-walkthrough-progress currentStep="6" totalSteps="9"></hid-walkthrough-progress>
+            <hid-walkthrough-progress currentStep="6" totalSteps="10"></hid-walkthrough-progress>
             <button class="icon-button" ?disabled="${!hasData}" @click="${() => this._completeManualStep('tilt-y')}" title="Next Step">→</button>
           </div>
           <div class="step-description">
@@ -433,7 +453,7 @@ export class HidDataReader extends LitElement {
           <div class="step-header">
             <h3>Step 8: Primary Button Detection</h3>
             <button class="icon-button" @click="${this._resetCapture}" title="Reset">🔄</button>
-            <hid-walkthrough-progress currentStep="7" totalSteps="9"></hid-walkthrough-progress>
+            <hid-walkthrough-progress currentStep="7" totalSteps="10"></hid-walkthrough-progress>
             <button class="icon-button" ?disabled="${!hasData}" @click="${() => this._completeManualStep('primary-button')}" title="Next Step">→</button>
           </div>
           <div class="step-description">
@@ -454,7 +474,7 @@ export class HidDataReader extends LitElement {
           <div class="step-header">
             <h3>Step 9: Secondary Button Detection</h3>
             <button class="icon-button" @click="${this._resetCapture}" title="Reset">🔄</button>
-            <hid-walkthrough-progress currentStep="8" totalSteps="9"></hid-walkthrough-progress>
+            <hid-walkthrough-progress currentStep="8" totalSteps="10"></hid-walkthrough-progress>
             <button class="icon-button" ?disabled="${!hasData}" @click="${() => this._completeManualStep('secondary-button')}" title="Next Step">→</button>
           </div>
           <div class="step-description">
@@ -468,17 +488,40 @@ export class HidDataReader extends LitElement {
       `;
     }
 
+    if (this.walkthroughStep === 'step10-metadata') {
+      return html`
+        <div class="section walkthrough active">
+          <div class="step-header">
+            <h3>Step 10: Device Information</h3>
+            <button class="icon-button" @click="${this._resetCapture}" title="Reset">🔄</button>
+            <hid-walkthrough-progress currentStep="9" totalSteps="10"></hid-walkthrough-progress>
+            <button class="icon-button" disabled title="Next Step">→</button>
+          </div>
+          <p>Please provide some additional information about your device to complete the configuration.</p>
+
+          <device-metadata-form
+            .suggestedName=${this._generateSuggestedName()}
+            .suggestedManufacturer=${this._generateSuggestedManufacturer()}
+            .suggestedModel=${this._generateSuggestedModel()}
+            .suggestedDescription=${this._generateSuggestedDescription()}
+            .suggestedButtonCount=${this._generateSuggestedButtonCount()}
+            @metadata-submit=${this._handleMetadataSubmit}
+            @metadata-cancel=${this._handleMetadataCancel}
+          ></device-metadata-form>
+        </div>
+      `;
+    }
+
     if (this.walkthroughStep === 'complete') {
       return html`
         <div class="section walkthrough active">
           <div class="step-header">
-            <h3>✅ Analysis Complete!</h3>
+            <h3>✅ Configuration Complete!</h3>
             <button class="icon-button" @click="${this._resetCapture}" title="Reset">🔄</button>
-            <hid-walkthrough-progress currentStep="9" totalSteps="9"></hid-walkthrough-progress>
+            <hid-walkthrough-progress currentStep="10" totalSteps="10"></hid-walkthrough-progress>
             <button class="icon-button" disabled title="Next Step">→</button>
           </div>
-          <p>We've identified which bytes represent coordinates, pressure, tilt, and button states in the HID data.</p>
-          ${this._renderLiveAnalysis()}
+          <p>Your complete device configuration is ready!</p>
 
           ${this._renderConfigPanel()}
         </div>
@@ -504,15 +547,7 @@ export class HidDataReader extends LitElement {
     return html`
       <div class="config-section">
         <div class="config-header">
-          <h4>📋 Device Configuration</h4>
-          <div class="config-actions">
-            <button class="button small" @click="${this._copyConfig}">
-              📋 Copy JSON
-            </button>
-            <button class="button small" @click="${this._downloadConfig}">
-              💾 Download
-            </button>
-          </div>
+          <h4>📋 Detected Byte Mappings</h4>
         </div>
 
         <div class="config-grid">
@@ -523,9 +558,6 @@ export class HidDataReader extends LitElement {
           ${this.deviceConfig.tiltX ? this._renderTiltConfig('Tilt X', this.deviceConfig.tiltX, '↔️') : ''}
           ${this.deviceConfig.tiltY ? this._renderTiltConfig('Tilt Y', this.deviceConfig.tiltY, '↕️') : ''}
         </div>
-
-        <!-- Hidden JSON for copy/download -->
-        <pre style="display: none;"><code id="config-json">${configJson}</code></pre>
       </div>
     `;
   }
@@ -697,6 +729,24 @@ export class HidDataReader extends LitElement {
     this.realDeviceName = result.deviceInfo.name;
     this.isRealDevice = true;
 
+    // Capture device metadata for configuration generation
+    this.deviceMetadata = {
+      vendorId: result.primaryDevice.vendorId,
+      productId: result.primaryDevice.productId,
+      productName: result.primaryDevice.productName,
+      collections: result.primaryDevice.collections
+        .filter(c => c.usagePage !== undefined && c.usage !== undefined)
+        .map(c => ({
+          usagePage: c.usagePage!,
+          usage: c.usage!
+        })),
+      allInterfaces: result.allDevices
+        .flatMap(d => d.collections.map(c => c.usagePage))
+        .filter((v): v is number => v !== undefined)
+        .filter((v, i, a) => a.indexOf(v) === i) // unique values
+    };
+    console.log('[HIDDataReader] Captured device metadata:', this.deviceMetadata);
+
     // Initialize device data streams
     this.deviceDataStreams.clear();
     result.allDevices.forEach((_, index) => {
@@ -780,8 +830,14 @@ export class HidDataReader extends LitElement {
     }
 
     // Track which devices are active during walkthrough
-    if (this.walkthroughStep !== 'idle' && this.walkthroughStep !== 'complete') {
+    if (this.walkthroughStep !== 'idle' && this.walkthroughStep !== 'step10-metadata' && this.walkthroughStep !== 'complete') {
       this.activeDeviceIndices.add(deviceIndex);
+    }
+
+    // Capture report ID from first packet (if not already captured)
+    if (!this.deviceMetadata.detectedReportId && data.length > 0) {
+      this.deviceMetadata.detectedReportId = data[0];
+      console.log('[HIDDataReader] Detected report ID:', data[0]);
     }
 
     // Also update the main display (for backwards compatibility)
@@ -800,7 +856,7 @@ export class HidDataReader extends LitElement {
     this.currentBytes = hexString;
 
     // Capture packets during walkthrough steps
-    const isInWalkthroughStep = this.walkthroughStep !== 'idle' && this.walkthroughStep !== 'complete';
+    const isInWalkthroughStep = this.walkthroughStep !== 'idle' && this.walkthroughStep !== 'step10-metadata' && this.walkthroughStep !== 'complete';
     if (isInWalkthroughStep) {
       this.capturedPackets.push(new Uint8Array(data));
     }
@@ -1089,7 +1145,8 @@ export class HidDataReader extends LitElement {
       // Generate final config with status byte mappings
       this._generateDeviceConfig();
 
-      this.walkthroughStep = 'complete';
+      // Move to metadata form step
+      this.walkthroughStep = 'step10-metadata';
     }
   }
 
@@ -1542,10 +1599,97 @@ export class HidDataReader extends LitElement {
           <span class="collapse-icon">${this.isConfigPanelExpanded ? '▼' : '▶'}</span>
         </div>
         ${this.isConfigPanelExpanded ? html`
-          <hid-json-config .config=${this.deviceConfig} .metadata=${metadata}></hid-json-config>
+          <hid-json-config .config=${this.completeConfig || this.deviceConfig} .metadata=${metadata}></hid-json-config>
         ` : ''}
       </div>
     `;
+  }
+
+  private _handleMetadataSubmit(e: CustomEvent<MetadataFormData>) {
+    const userMetadata: UserProvidedMetadata = e.detail;
+
+    // Generate complete configuration
+    this.completeConfig = generateCompleteConfig(
+      this.deviceMetadata,
+      userMetadata,
+      this.deviceConfig!
+    );
+
+    // Move to complete step
+    this.walkthroughStep = 'complete';
+    this.isConfigPanelExpanded = true;
+
+    console.log('[HIDDataReader] Generated complete configuration:', this.completeConfig);
+  }
+
+  private _handleMetadataCancel() {
+    // Can't cancel - this is a required step
+    // Just stay on the metadata form
+  }
+
+  private _generateSuggestedName(): string {
+    // Use product name from WebHID if available
+    return this.deviceMetadata.productName || 'Unknown Tablet';
+  }
+
+  private _generateSuggestedManufacturer(): string {
+    // Try to extract manufacturer from product name
+    const productName = this.deviceMetadata.productName || '';
+
+    // Common patterns: "Manufacturer Model" or "Manufacturer-Model"
+    const parts = productName.split(/[\s-]/);
+    if (parts.length > 0) {
+      return parts[0];
+    }
+
+    return '';
+  }
+
+  private _generateSuggestedModel(): string {
+    // Try to extract model from product name
+    const productName = this.deviceMetadata.productName || '';
+
+    // If product name has multiple parts, use everything after the first part
+    const parts = productName.split(/[\s-]/);
+    if (parts.length > 1) {
+      return parts.slice(1).join(' ');
+    }
+
+    // Otherwise use the whole product name
+    return productName;
+  }
+
+  private _generateSuggestedDescription(): string {
+    const manufacturer = this._generateSuggestedManufacturer();
+    const model = this._generateSuggestedModel();
+    const hasTilt = this.deviceConfig?.tiltX || this.deviceConfig?.tiltY;
+
+    let desc = '';
+    if (manufacturer && model) {
+      desc = `${manufacturer} ${model} graphics tablet`;
+    } else if (this.deviceMetadata.productName) {
+      desc = `${this.deviceMetadata.productName} graphics tablet`;
+    } else {
+      desc = 'Graphics tablet';
+    }
+
+    // Add features
+    const features: string[] = [];
+    if (hasTilt) {
+      features.push('with tilt support');
+    }
+
+    if (features.length > 0) {
+      desc += ' ' + features.join(', ');
+    }
+
+    return desc;
+  }
+
+  private _generateSuggestedButtonCount(): number {
+    // Default to 0 - user should specify
+    // Could potentially detect from button interface, but safer to ask
+    return 0;
   }
 
 
