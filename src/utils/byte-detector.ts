@@ -211,10 +211,11 @@ export function findStatusByte(
     if (excludeIndices.has(byte.byteIndex)) continue;
 
     // Status byte characteristics:
-    // - Low variance (changes between a few states)
-    // - Multiple distinct values (not constant)
+    // - Has variance (not constant)
+    // - Multiple distinct values (discrete codes, not continuous ranges)
     // - Typically 2-10 different states
-    if (byte.variance > 0 && byte.variance < 10) {
+    // Don't filter by variance amount - status byte can have moderate variance
+    if (byte.variance > 0) {
       // Count distinct values
       const distinctValues = new Set<number>();
       for (const packet of packets) {
@@ -284,6 +285,7 @@ export function generateDeviceConfig(
     ]);
 
     const statusByteIndex = findStatusByte(allPackets, excludeIndices);
+
     if (statusByteIndex !== null) {
       const values: Record<string, StatusValue> = {};
       statusByteValues.forEach((value, byteValue) => {

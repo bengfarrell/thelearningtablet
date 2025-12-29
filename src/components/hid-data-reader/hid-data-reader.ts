@@ -93,6 +93,9 @@ export class HidDataReader extends LitElement {
   // Track observed status byte values
   private statusByteValues: Map<number, StatusValue> = new Map();
 
+  // Track all packets from all steps for status byte detection
+  private allWalkthroughPackets: Uint8Array[] = [];
+
   // Track which devices sent data during walkthrough
   private activeDeviceIndices: Set<number> = new Set();
 
@@ -896,11 +899,15 @@ export class HidDataReader extends LitElement {
     }
 
     // Auto-stop when gesture completes (but don't auto-advance the step)
+    // Add extra time (200ms) to allow pen away packets to be sent
+    const gestureDuration = this._getGestureDuration(gesture);
+    const extraTimeForPenAway = 200; // Time for 5 packets at 200Hz = 25ms, but add buffer
+
     setTimeout(() => {
       if (this.isPlaying && this.currentGesture === gesture) {
         this._stopGesture();
       }
-    }, this._getGestureDuration(gesture));
+    }, gestureDuration + extraTimeForPenAway);
   }
 
   private _handleGestureComplete(gesture: string) {
@@ -908,18 +915,24 @@ export class HidDataReader extends LitElement {
     if (this.walkthroughStep === 'step1-horizontal' && gesture === 'horizontal') {
       // Save packets for persistent live view
       this.lastCapturedPackets = [...this.capturedPackets];
-      const analysis = analyzeBytes(this.capturedPackets);
-      // Store best guess bytes for horizontal movement (top 2 bytes for X coordinate)
-      this.horizontalBytes = getBestGuessBytesByVariance(analysis, 2);
-      // Track status byte for contact
+
+      // Track status byte for contact FIRST
       this._trackStatusByte('contact');
+
+      // Now analyze bytes, excluding the status byte (byte 0)
+      const analysis = analyzeBytes(this.capturedPackets);
+      // Exclude byte 0 (status byte) from coordinate detection
+      const filteredAnalysis = analysis.filter(b => b.byteIndex !== 0);
+      // Store best guess bytes for horizontal movement (top 2 bytes for X coordinate)
+      this.horizontalBytes = getBestGuessBytesByVariance(filteredAnalysis, 2);
+
       this.walkthroughStep = 'step2-vertical';
       this.capturedPackets = [];
     } else if (this.walkthroughStep === 'step2-vertical' && gesture === 'vertical') {
       this.lastCapturedPackets = [...this.capturedPackets];
       const analysis = analyzeBytes(this.capturedPackets);
-      // Filter out bytes we already identified in step 1 (X coordinate)
-      const knownByteIndices = new Set(this.horizontalBytes.map(b => b.byteIndex));
+      // Filter out bytes we already identified in step 1 (X coordinate and status byte 0)
+      const knownByteIndices = new Set([0, ...this.horizontalBytes.map(b => b.byteIndex)]);
       const filteredAnalysis = analysis.filter(b => !knownByteIndices.has(b.byteIndex));
       // Store best guess bytes for vertical movement (top 2 bytes for Y coordinate)
       this.verticalBytes = getBestGuessBytesByVariance(filteredAnalysis, 2);
@@ -928,8 +941,9 @@ export class HidDataReader extends LitElement {
     } else if (this.walkthroughStep === 'step3-pressure' && gesture === 'pressure') {
       this.lastCapturedPackets = [...this.capturedPackets];
       const analysis = analyzeBytes(this.capturedPackets);
-      // Filter out bytes we already identified (X and Y coordinates)
+      // Filter out bytes we already identified (X, Y coordinates, and status byte 0)
       const knownByteIndices = new Set([
+        0,
         ...this.horizontalBytes.map(b => b.byteIndex),
         ...this.verticalBytes.map(b => b.byteIndex),
       ]);
@@ -940,18 +954,26 @@ export class HidDataReader extends LitElement {
       this.capturedPackets = [];
     } else if (this.walkthroughStep === 'step4-hover-horizontal' && gesture === 'hover-horizontal') {
       this.lastCapturedPackets = [...this.capturedPackets];
-      const analysis = analyzeBytes(this.capturedPackets);
-      // Store bytes that changed during horizontal hover (X coordinate only, no pressure)
-      this.hoverHorizontalBytes = getBestGuessBytesByVariance(analysis, 2);
-      // Track status byte for hover
+
+      // Track status byte for hover FIRST
       this._trackStatusByte('hover');
+
+      // Now analyze bytes, excluding the status byte (byte 0)
+      const analysis = analyzeBytes(this.capturedPackets);
+      const filteredAnalysis = analysis.filter(b => b.byteIndex !== 0);
+      // Store bytes that changed during horizontal hover (X coordinate only, no pressure)
+      this.hoverHorizontalBytes = getBestGuessBytesByVariance(filteredAnalysis, 2);
+
       this.walkthroughStep = 'step5-hover-vertical';
       this.capturedPackets = [];
     } else if (this.walkthroughStep === 'step5-hover-vertical' && gesture === 'hover-vertical') {
       this.lastCapturedPackets = [...this.capturedPackets];
       const analysis = analyzeBytes(this.capturedPackets);
+      // Exclude status byte (byte 0) AND X coordinate bytes
+      const knownByteIndices = new Set([0, ...this.horizontalBytes.map(b => b.byteIndex)]);
+      const filteredAnalysis = analysis.filter(b => !knownByteIndices.has(b.byteIndex));
       // Store bytes that changed during vertical hover (Y coordinate only, no pressure)
-      this.hoverVerticalBytes = getBestGuessBytesByVariance(analysis, 2);
+      this.hoverVerticalBytes = getBestGuessBytesByVariance(filteredAnalysis, 2);
 
       // Identify X, Y, and pressure before moving to tilt
       this._identifyCoordinateAndPressureBytes();
@@ -961,8 +983,9 @@ export class HidDataReader extends LitElement {
     } else if (this.walkthroughStep === 'step6-tilt-x' && gesture === 'tilt-x') {
       this.lastCapturedPackets = [...this.capturedPackets];
       const analysis = analyzeBytes(this.capturedPackets);
-      // Filter out already-identified bytes (X, Y, pressure)
+      // Filter out already-identified bytes (status byte 0, X, Y, pressure)
       const knownByteIndices = new Set([
+        0,
         ...this.horizontalBytes.map(b => b.byteIndex),
         ...this.verticalBytes.map(b => b.byteIndex),
         ...this.pressureBytes.map(b => b.byteIndex),
@@ -974,8 +997,9 @@ export class HidDataReader extends LitElement {
     } else if (this.walkthroughStep === 'step7-tilt-y' && gesture === 'tilt-y') {
       this.lastCapturedPackets = [...this.capturedPackets];
       const analysis = analyzeBytes(this.capturedPackets);
-      // Filter out already-identified bytes (X, Y, pressure, AND tilt-X)
+      // Filter out already-identified bytes (status byte 0, X, Y, pressure, AND tilt-X)
       const knownByteIndices = new Set([
+        0,
         ...this.horizontalBytes.map(b => b.byteIndex),
         ...this.verticalBytes.map(b => b.byteIndex),
         ...this.pressureBytes.map(b => b.byteIndex),
@@ -991,25 +1015,75 @@ export class HidDataReader extends LitElement {
       this.capturedPackets = [];
     } else if (this.walkthroughStep === 'step8-primary-button' && gesture === 'primary-button') {
       this.lastCapturedPackets = [...this.capturedPackets];
-      // Track status byte value for primary button
+      // Track status byte values for primary button (both hover and contact states)
       if (this.capturedPackets.length > 0) {
-        const statusByte = this.capturedPackets[0][1];
-        this.statusByteValues.set(statusByte, {
-          state: 'contact',
-          primaryButtonPressed: true,
-        });
+        // Add packets to the collection for status byte detection
+        this.allWalkthroughPackets.push(...this.capturedPackets);
+
+        const statusByteIndex = this._findStatusByteFromAllPackets();
+
+        if (statusByteIndex !== null) {
+          // Track all unique status byte values in the captured packets
+          const uniqueStatusBytes = new Set(this.capturedPackets.map(p => p[statusByteIndex]));
+
+          uniqueStatusBytes.forEach(statusByte => {
+            // Check if this is a "pen away" packet (all zeros except status byte)
+            const samplePacket = this.capturedPackets.find(p => p[statusByteIndex] === statusByte);
+            if (samplePacket) {
+              const allZeros = samplePacket.slice(1).every(b => b === 0);
+
+              if (allZeros) {
+                // This is a "pen away" packet - skip it, already tracked as "none"
+                return;
+              }
+
+              const pressure = samplePacket[5] | (samplePacket[6] << 8);
+              const state = pressure > 0 ? 'contact' : 'hover';
+
+              this.statusByteValues.set(statusByte, {
+                state,
+                primaryButtonPressed: true,
+              });
+            }
+          });
+        }
       }
       this.walkthroughStep = 'step9-secondary-button';
       this.capturedPackets = [];
     } else if (this.walkthroughStep === 'step9-secondary-button' && gesture === 'secondary-button') {
       this.lastCapturedPackets = [...this.capturedPackets];
-      // Track status byte value for secondary button
+      // Track status byte values for secondary button (both hover and contact states)
       if (this.capturedPackets.length > 0) {
-        const statusByte = this.capturedPackets[0][1];
-        this.statusByteValues.set(statusByte, {
-          state: 'contact',
-          secondaryButtonPressed: true,
-        });
+        // Add packets to the collection for status byte detection
+        this.allWalkthroughPackets.push(...this.capturedPackets);
+
+        const statusByteIndex = this._findStatusByteFromAllPackets();
+
+        if (statusByteIndex !== null) {
+          // Track all unique status byte values in the captured packets
+          const uniqueStatusBytes = new Set(this.capturedPackets.map(p => p[statusByteIndex]));
+
+          uniqueStatusBytes.forEach(statusByte => {
+            // Check if this is a "pen away" packet (all zeros except status byte)
+            const samplePacket = this.capturedPackets.find(p => p[statusByteIndex] === statusByte);
+            if (samplePacket) {
+              const allZeros = samplePacket.slice(1).every(b => b === 0);
+
+              if (allZeros) {
+                // This is a "pen away" packet - skip it, already tracked as "none"
+                return;
+              }
+
+              const pressure = samplePacket[5] | (samplePacket[6] << 8);
+              const state = pressure > 0 ? 'contact' : 'hover';
+
+              this.statusByteValues.set(statusByte, {
+                state,
+                secondaryButtonPressed: true,
+              });
+            }
+          });
+        }
       }
 
       // Generate final config with status byte mappings
@@ -1068,20 +1142,88 @@ export class HidDataReader extends LitElement {
     return null;
   }
 
+  private _findStatusByteFromAllPackets(): number | null {
+    // Find the status byte by analyzing ALL packets collected during the walkthrough
+    // This allows us to see variance across different states (hover, contact, buttons)
+    if (this.allWalkthroughPackets.length === 0) return null;
+
+    const analysis = analyzeBytes(this.allWalkthroughPackets);
+    const knownByteIndices = new Set([
+      ...this.horizontalBytes.map(b => b.byteIndex),
+      ...this.verticalBytes.map(b => b.byteIndex),
+      ...this.pressureBytes.map(b => b.byteIndex),
+      ...this.hoverHorizontalBytes.map(b => b.byteIndex),
+      ...this.hoverVerticalBytes.map(b => b.byteIndex),
+      ...this.tiltXBytes.map(b => b.byteIndex),
+      ...this.tiltYBytes.map(b => b.byteIndex),
+    ]);
+
+    // Look for a byte with multiple distinct values (status codes) but not continuous variation
+    // Status byte characteristics:
+    // - Has multiple distinct values (2-10 unique values for different states)
+    // - Values are discrete codes, not continuous ranges
+    // - Not already identified as coordinate/pressure/tilt
+    for (const byte of analysis) {
+      if (knownByteIndices.has(byte.byteIndex)) continue;
+      if (byte.variance === 0) continue; // Skip constant bytes
+
+      const uniqueValues = new Set(this.allWalkthroughPackets.map(p => p[byte.byteIndex]));
+
+      // Status byte should have 2-10 unique values (different states)
+      // Don't filter by variance - status byte can have moderate variance
+      if (uniqueValues.size >= 2 && uniqueValues.size <= 10) {
+        return byte.byteIndex;
+      }
+    }
+
+    return null;
+  }
+
   private _trackStatusByte(state: string) {
     if (this.capturedPackets.length > 0) {
-      const statusByteIndex = this._findStatusByte();
+      // Add packets to the collection for status byte detection
+      this.allWalkthroughPackets.push(...this.capturedPackets);
+
+      // Find the status byte by looking at all packets collected so far
+      const statusByteIndex = this._findStatusByteFromAllPackets();
+
       if (statusByteIndex !== null) {
-        const statusByte = this.capturedPackets[0][statusByteIndex];
-        if (!this.statusByteValues.has(statusByte)) {
-          this.statusByteValues.set(statusByte, { state });
-        }
+        // Track all unique status bytes in the captured packets
+        const uniqueStatusBytes = new Set(this.capturedPackets.map(p => p[statusByteIndex]));
+
+        uniqueStatusBytes.forEach(statusByte => {
+          if (!this.statusByteValues.has(statusByte)) {
+            // Check if this is a "pen away" packet (all zeros except status byte)
+            const samplePacket = this.capturedPackets.find(p => p[statusByteIndex] === statusByte);
+            if (samplePacket) {
+              const allZeros = samplePacket.slice(1).every(b => b === 0);
+              const actualState = allZeros ? 'none' : state;
+
+              this.statusByteValues.set(statusByte, { state: actualState });
+            }
+          }
+        });
+      } else {
+        // Fallback: use byte 0 if we can't detect it yet (early in walkthrough)
+        const uniqueStatusBytes = new Set(this.capturedPackets.map(p => p[0]));
+        uniqueStatusBytes.forEach(statusByte => {
+          if (!this.statusByteValues.has(statusByte)) {
+            const samplePacket = this.capturedPackets.find(p => p[0] === statusByte);
+            if (samplePacket) {
+              const allZeros = samplePacket.slice(1).every(b => b === 0);
+              const actualState = allZeros ? 'none' : state;
+
+              this.statusByteValues.set(statusByte, { state: actualState });
+            }
+          }
+        });
       }
     }
   }
 
   private _generateDeviceConfig() {
     // Use the utility function to generate the config
+    // Pass allWalkthroughPackets so findStatusByte can analyze variance across all states
     this.deviceConfig = generateDeviceConfig(
       this.horizontalBytes,
       this.verticalBytes,
@@ -1089,7 +1231,7 @@ export class HidDataReader extends LitElement {
       this.tiltXBytes,
       this.tiltYBytes,
       this.statusByteValues,
-      this.lastCapturedPackets
+      this.allWalkthroughPackets
     );
   }
 
@@ -1353,6 +1495,7 @@ export class HidDataReader extends LitElement {
     this.deviceConfig = null;
     this.capturedPackets = [];
     this.lastCapturedPackets = [];
+    this.allWalkthroughPackets = [];
     this.statusByteValues.clear();
     this._clearBytes();
   }

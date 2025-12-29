@@ -196,70 +196,113 @@ describe('Walkthrough Byte Detection', () => {
       const expectedConfigPath = join(process.cwd(), 'public/exampleconfigurations/xp_pen_deco_640_osx_nodriver.json');
       const expectedConfig = JSON.parse(readFileSync(expectedConfigPath, 'utf-8'));
 
-      // Simulate all steps to collect data
+      // Simulate all walkthrough steps to collect data
+      // Use higher maxPackets to ensure we capture the pen away packets at the end
       const horizontalPackets = collectPackets(
-        generator.generateLineConstantPressure(0, 0.5, 1, 0.5, 0.5, 1500)
+        generator.generateLineConstantPressure(0, 0.5, 1, 0.5, 0.5, 1500),
+        350
       );
       const verticalPackets = collectPackets(
-        generator.generateLineConstantPressure(0.5, 0, 0.5, 1, 0.5, 1500)
+        generator.generateLineConstantPressure(0.5, 0, 0.5, 1, 0.5, 1500),
+        350
       );
       const pressurePackets = collectPackets(
-        generator.generateLine(0.5, 0.5, 0.5, 0.5, 1500)
+        generator.generateLine(0.5, 0.5, 0.5, 0.5, 1500),
+        350
+      );
+      const hoverHorizontalPackets = collectPackets(
+        generator.generateHoverLine(0, 0.5, 1, 0.5, 1500),
+        350
+      );
+      const hoverVerticalPackets = collectPackets(
+        generator.generateHoverLine(0.5, 0, 0.5, 1, 1500),
+        350
       );
       const tiltXPackets = collectPackets(
-        generator.generateTiltXLine(0.5, 0.5, 0.5, 0.5, 1500)
+        generator.generateTiltXLine(0.5, 0.5, 0.5, 0.5, 1500),
+        350
       );
       const tiltYPackets = collectPackets(
-        generator.generateTiltYLine(0.5, 0.5, 0.5, 0.5, 1500)
+        generator.generateTiltYLine(0.5, 0.5, 0.5, 0.5, 1500),
+        350
+      );
+      const primaryButtonPackets = collectPackets(
+        generator.generatePrimaryButtonLine(0, 0.5, 1, 0.5, 1500),
+        350
+      );
+      const secondaryButtonPackets = collectPackets(
+        generator.generateSecondaryButtonLine(0, 0.5, 1, 0.5, 1500),
+        350
       );
 
-      // Detect bytes for each step
+      // Detect bytes for each step (excluding status byte 0)
       const horizontalAnalysis = analyzeBytes(horizontalPackets);
-      const horizontalBytes = getBestGuessBytesByVariance(horizontalAnalysis, 2);
+      const filteredHorizontal = horizontalAnalysis.filter(b => b.byteIndex !== 0);
+      const horizontalBytes = getBestGuessBytesByVariance(filteredHorizontal, 2);
 
       const verticalAnalysis = analyzeBytes(verticalPackets);
-      const filteredVertical = verticalAnalysis.filter(b => ![1, 2].includes(b.byteIndex));
+      const filteredVertical = verticalAnalysis.filter(b => ![0, 1, 2].includes(b.byteIndex));
       const verticalBytes = getBestGuessBytesByVariance(filteredVertical, 2);
 
       const pressureAnalysis = analyzeBytes(pressurePackets);
-      const filteredPressure = pressureAnalysis.filter(b => ![1, 2, 3, 4].includes(b.byteIndex));
+      const filteredPressure = pressureAnalysis.filter(b => ![0, 1, 2, 3, 4].includes(b.byteIndex));
       const pressureBytes = getBestGuessBytesByVariance(filteredPressure, 2);
 
       const tiltXAnalysis = analyzeBytes(tiltXPackets);
-      const filteredTiltX = tiltXAnalysis.filter(b => ![1, 2, 3, 4, 5, 6].includes(b.byteIndex));
+      const filteredTiltX = tiltXAnalysis.filter(b => ![0, 1, 2, 3, 4, 5, 6].includes(b.byteIndex));
       const tiltXBytes = getBestGuessBytesByVariance(filteredTiltX, 1);
 
       const tiltYAnalysis = analyzeBytes(tiltYPackets);
-      const filteredTiltY = tiltYAnalysis.filter(b => ![1, 2, 3, 4, 5, 6, 7].includes(b.byteIndex));
+      const filteredTiltY = tiltYAnalysis.filter(b => ![0, 1, 2, 3, 4, 5, 6, 7].includes(b.byteIndex));
       const tiltYBytes = getBestGuessBytesByVariance(filteredTiltY, 1);
 
-      // Collect status byte values
-      const statusByteValues = new Map();
+      // Collect all packets
       const allPackets = [
         ...horizontalPackets,
         ...verticalPackets,
         ...pressurePackets,
+        ...hoverHorizontalPackets,
+        ...hoverVerticalPackets,
         ...tiltXPackets,
         ...tiltYPackets,
+        ...primaryButtonPackets,
+        ...secondaryButtonPackets,
       ];
 
-      // Track unique status byte values
+      // Track status byte values from all packets
+      const statusByteValues = new Map();
       const statusByteIndex = 0;
-      const uniqueStatusValues = new Set<number>();
-      allPackets.forEach(packet => {
-        uniqueStatusValues.add(packet[statusByteIndex]);
-      });
 
-      // Map status values to states (based on actual mock device values)
-      uniqueStatusValues.forEach(value => {
-        if (value === 0xa0) {
-          statusByteValues.set(value, { hover: true });
-        } else if (value === 0xa1) {
-          statusByteValues.set(value, { contact: true });
-        } else if (value === 0xa5) {
-          statusByteValues.set(value, { contact: true, primaryButton: true });
-        } else if (value === 0xa3) {
-          statusByteValues.set(value, { contact: true, secondaryButton: true });
+      allPackets.forEach(packet => {
+        const statusByte = packet[statusByteIndex];
+
+        // Skip if already tracked
+        if (statusByteValues.has(statusByte)) return;
+
+        // Check if this is a "pen away" packet (all zeros except status byte)
+        const allZeros = packet.slice(1).every(b => b === 0);
+
+        if (allZeros) {
+          // Pen away state (status byte 192/0xc0)
+          statusByteValues.set(statusByte, { state: 'none' });
+        } else if (statusByte === 0xa0) {
+          // 160: hover
+          statusByteValues.set(statusByte, { state: 'hover' });
+        } else if (statusByte === 0xa1) {
+          // 161: contact
+          statusByteValues.set(statusByte, { state: 'contact' });
+        } else if (statusByte === 0xa2) {
+          // 162: hover + secondary button
+          statusByteValues.set(statusByte, { state: 'hover', secondaryButtonPressed: true });
+        } else if (statusByte === 0xa3) {
+          // 163: contact + secondary button
+          statusByteValues.set(statusByte, { state: 'contact', secondaryButtonPressed: true });
+        } else if (statusByte === 0xa4) {
+          // 164: hover + primary button
+          statusByteValues.set(statusByte, { state: 'hover', primaryButtonPressed: true });
+        } else if (statusByte === 0xa5) {
+          // 165: contact + primary button
+          statusByteValues.set(statusByte, { state: 'contact', primaryButtonPressed: true });
         }
       });
 
@@ -274,7 +317,7 @@ describe('Walkthrough Byte Detection', () => {
         allPackets
       );
 
-      // Verify configuration matches expected structure
+      // Verify configuration matches expected structure (1-based indexing in JSON)
       expect(generatedConfig.x.byteIndex).toEqual([2, 3]);
       expect(generatedConfig.y.byteIndex).toEqual([4, 5]);
       expect(generatedConfig.pressure.byteIndex).toEqual([6, 7]);
@@ -288,13 +331,24 @@ describe('Walkthrough Byte Detection', () => {
       expect(generatedConfig.tiltX.type).toBe('bipolar-range');
       expect(generatedConfig.tiltY.type).toBe('bipolar-range');
 
-      // Verify status byte if it exists (optional since we're not testing button presses in this flow)
-      if (generatedConfig.status) {
-        expect(generatedConfig.status.byteIndex).toEqual([1]);
-        expect(generatedConfig.status.type).toBe('code');
-        expect(generatedConfig.status.values).toBeDefined();
-        expect(Object.keys(generatedConfig.status.values).length).toBeGreaterThan(0);
-      }
+      // Verify status block
+      expect(generatedConfig.status).toBeDefined();
+      expect(generatedConfig.status!.byteIndex).toEqual([1]);
+      expect(generatedConfig.status!.type).toBe('code');
+      expect(generatedConfig.status!.values).toBeDefined();
+
+      // Verify all 7 status codes are present
+      const statusValues = generatedConfig.status!.values;
+      expect(Object.keys(statusValues)).toHaveLength(7);
+
+      // Verify each status code
+      expect(statusValues['192']).toEqual({ state: 'none' });
+      expect(statusValues['160']).toEqual({ state: 'hover' });
+      expect(statusValues['161']).toEqual({ state: 'contact' });
+      expect(statusValues['162']).toEqual({ state: 'hover', secondaryButtonPressed: true });
+      expect(statusValues['163']).toEqual({ state: 'contact', secondaryButtonPressed: true });
+      expect(statusValues['164']).toEqual({ state: 'hover', primaryButtonPressed: true });
+      expect(statusValues['165']).toEqual({ state: 'contact', primaryButtonPressed: true });
     });
   });
 });

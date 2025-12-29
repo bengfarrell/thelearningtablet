@@ -50,6 +50,10 @@ export class TabletDataGenerator {
     pressureVariation: 0.2,
   };
 
+  // Number of "pen away" packets to add at the end of gestures
+  // Increased to 30 to ensure they're captured (150ms at 200Hz)
+  private readonly PEN_AWAY_PACKETS = 30;
+
   constructor(config?: Partial<GeneratorConfig>) {
     this.config = { ...this.defaultConfig, ...config };
   }
@@ -69,10 +73,18 @@ export class TabletDataGenerator {
     const tiltXByte = Math.round(((tiltX + 1) / 2) * 255);
     const tiltYByte = Math.round(((tiltY + 1) / 2) * 255);
 
+    // Determine status byte based on pressure if not overridden
+    // 0xa0 (160) = hover (no pressure)
+    // 0xa1 (161) = contact (with pressure)
+    let statusByte = statusByteOverride;
+    if (statusByte === undefined) {
+      statusByte = normalizedPressure > 0 ? 0xa1 : 0xa0;
+    }
+
     // Create HID packet matching XP-Pen Deco 640 structure (without Report ID)
     // WebHID strips the Report ID from inputreport events, so we match that behavior
     const packet = new Uint8Array(9);
-    packet[0] = statusByteOverride ?? this.config.statusByte; // Status byte (stylus mode or override)
+    packet[0] = statusByte; // Status byte (hover/contact/buttons)
     packet[1] = normalizedX & 0xff;             // X low byte
     packet[2] = (normalizedX >> 8) & 0xff;      // X high byte
     packet[3] = normalizedY & 0xff;             // Y low byte
@@ -182,6 +194,11 @@ export class TabletDataGenerator {
 
       yield this.generatePacket(x, y, pressure, 0, 0);
     }
+
+    // Add pen away packets at the end
+    for (let i = 0; i < this.PEN_AWAY_PACKETS; i++) {
+      yield this.generatePenAwayPacket();
+    }
   }
 
   /**
@@ -283,6 +300,17 @@ export class TabletDataGenerator {
   }
 
   /**
+   * Generate a "pen away" packet (pen not in detection range)
+   * Status byte: 0xc0 (192) = none
+   */
+  generatePenAwayPacket(): Uint8Array {
+    const packet = new Uint8Array(9);
+    packet[0] = 0xc0; // Status byte for "none" state
+    // All other bytes are 0 (no position, pressure, or tilt data)
+    return packet;
+  }
+
+  /**
    * Generate a hover line (no pressure)
    */
   *generateHoverLine(
@@ -300,6 +328,11 @@ export class TabletDataGenerator {
       const y = startY + (endY - startY) * t;
 
       yield this.generateHoverPacket(x, y);
+    }
+
+    // Add pen away packets at the end
+    for (let i = 0; i < this.PEN_AWAY_PACKETS; i++) {
+      yield this.generatePenAwayPacket();
     }
   }
 
@@ -326,6 +359,11 @@ export class TabletDataGenerator {
 
       yield this.generatePacket(x, y, pressure, tiltX, 0);
     }
+
+    // Add pen away packets at the end
+    for (let i = 0; i < this.PEN_AWAY_PACKETS; i++) {
+      yield this.generatePenAwayPacket();
+    }
   }
 
   /**
@@ -351,6 +389,11 @@ export class TabletDataGenerator {
 
       yield this.generatePacket(x, y, pressure, 0, tiltY);
     }
+
+    // Add pen away packets at the end
+    for (let i = 0; i < this.PEN_AWAY_PACKETS; i++) {
+      yield this.generatePenAwayPacket();
+    }
   }
 
   /**
@@ -365,16 +408,28 @@ export class TabletDataGenerator {
     duration: number
   ): Generator<Uint8Array> {
     const totalSamples = Math.floor((duration / 1000) * this.config.sampleRate);
+    const halfSamples = Math.floor(totalSamples / 2);
 
     for (let i = 0; i < totalSamples; i++) {
       const t = i / totalSamples;
       const x = startX + (endX - startX) * t;
       const y = startY + (endY - startY) * t;
 
-      const pressure = 0.7; // Moderate constant pressure
+      // First half: hover + primary button (0xa4 = 164)
+      // Second half: contact + primary button (0xa5 = 165)
+      if (i < halfSamples) {
+        // Hover with button pressed
+        yield this.generatePacket(x, y, 0, 0, 0, 0xa4);
+      } else {
+        // Contact with button pressed
+        const pressure = 0.7; // Moderate constant pressure
+        yield this.generatePacket(x, y, pressure, 0, 0, 0xa5);
+      }
+    }
 
-      // Status byte 0xa5 (165) = contact + primary button pressed
-      yield this.generatePacket(x, y, pressure, 0, 0, 0xa5);
+    // Add pen away packets at the end
+    for (let i = 0; i < this.PEN_AWAY_PACKETS; i++) {
+      yield this.generatePenAwayPacket();
     }
   }
 
@@ -390,16 +445,28 @@ export class TabletDataGenerator {
     duration: number
   ): Generator<Uint8Array> {
     const totalSamples = Math.floor((duration / 1000) * this.config.sampleRate);
+    const halfSamples = Math.floor(totalSamples / 2);
 
     for (let i = 0; i < totalSamples; i++) {
       const t = i / totalSamples;
       const x = startX + (endX - startX) * t;
       const y = startY + (endY - startY) * t;
 
-      const pressure = 0.7; // Moderate constant pressure
+      // First half: hover + secondary button (0xa2 = 162)
+      // Second half: contact + secondary button (0xa3 = 163)
+      if (i < halfSamples) {
+        // Hover with button pressed
+        yield this.generatePacket(x, y, 0, 0, 0, 0xa2);
+      } else {
+        // Contact with button pressed
+        const pressure = 0.7; // Moderate constant pressure
+        yield this.generatePacket(x, y, pressure, 0, 0, 0xa3);
+      }
+    }
 
-      // Status byte 0xa3 (163) = contact + secondary button pressed
-      yield this.generatePacket(x, y, pressure, 0, 0, 0xa3);
+    // Add pen away packets at the end
+    for (let i = 0; i < this.PEN_AWAY_PACKETS; i++) {
+      yield this.generatePenAwayPacket();
     }
   }
 
