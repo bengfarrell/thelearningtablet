@@ -156,7 +156,8 @@ export function processDeviceData(
   for (const [key, mapping] of Object.entries(mappings)) {
     if (mapping.type === MappingType.CODE) {
       const byteIndex = mapping.byteIndex ?? 0;
-      if (byteIndex < dataList.length) {
+      // Use 0-based indexing directly
+      if (byteIndex >= 0 && byteIndex < dataList.length) {
         const codeResult = parseCode(dataList, byteIndex, mapping.values ?? []);
         if (typeof codeResult === 'object' && codeResult !== null) {
           Object.assign(result, codeResult);
@@ -183,7 +184,8 @@ export function processDeviceData(
     if (key === 'tabletButtons' && mappingType === MappingType.CODE) {
       // ONLY process button codes from the button interface (Report ID 6)
       if (isButtonInterface) {
-        if (byteIndex < dataList.length) {
+        // Use 0-based indexing directly
+        if (byteIndex >= 0 && byteIndex < dataList.length) {
           const byteValue = String(dataList[byteIndex]);
           const valuesMap = mapping.values ?? {};
           if (byteValue in valuesMap) {
@@ -212,12 +214,11 @@ export function processDeviceData(
       continue;
     }
 
-    // Skip validation for multi-byte-range as it uses byteIndices instead
-    if (mappingType !== MappingType.MULTI_BYTE_RANGE && byteIndex >= dataList.length) {
-      continue;
-    }
-
     if (mappingType === 'range') {
+      // Use 0-based indexing directly
+      if (byteIndex < 0 || byteIndex >= dataList.length) {
+        continue;
+      }
       result[key] = parseRangeData(
         dataList,
         byteIndex,
@@ -227,8 +228,9 @@ export function processDeviceData(
     } else if (mappingType === MappingType.MULTI_BYTE_RANGE) {
       // Use byteIndex (standardized to always be an array)
       const byteIndices = Array.isArray(byteIndex) ? byteIndex : [byteIndex];
+      // Use 0-based indexing directly
       // Validate all indices are within bounds
-      if (byteIndices.every((idx: number) => idx < dataList.length)) {
+      if (byteIndices.every((idx: number) => idx >= 0 && idx < dataList.length)) {
         result[key] = parseMultiByteRangeData(
           dataList,
           byteIndices,
@@ -238,6 +240,10 @@ export function processDeviceData(
         );
       }
     } else if (mappingType === MappingType.BIPOLAR_RANGE) {
+      // Use 0-based indexing directly
+      if (byteIndex < 0 || byteIndex >= dataList.length) {
+        continue;
+      }
       result[key] = parseBipolarRangeData(
         dataList,
         byteIndex,
@@ -247,6 +253,10 @@ export function processDeviceData(
         mapping.negativeMax ?? 0
       );
     } else if (mappingType === MappingType.BIT_FLAGS) {
+      // Use 0-based indexing directly
+      if (byteIndex < 0 || byteIndex >= dataList.length) {
+        continue;
+      }
       const buttonStates = parseBitFlags(
         dataList,
         byteIndex,

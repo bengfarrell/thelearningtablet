@@ -38,6 +38,12 @@ export interface StatusConfig {
   values: Record<string, StatusValue>;
 }
 
+export interface TabletButtonsConfig {
+  byteIndex: number[];
+  buttonCount: number;
+  type: 'bit-flags';
+}
+
 export interface DeviceByteCodeMappings {
   status?: StatusConfig;
   x: CoordinateConfig;
@@ -45,6 +51,7 @@ export interface DeviceByteCodeMappings {
   pressure: CoordinateConfig;
   tiltX?: TiltConfig;
   tiltY?: TiltConfig;
+  tabletButtons?: TabletButtonsConfig;
 }
 
 /**
@@ -234,7 +241,7 @@ export function findStatusByte(
 
 /**
  * Generates the final device configuration from detected bytes.
- * Converts from 0-based internal indexing to 1-based JSON spec indexing.
+ * Uses 0-based indexing for all byte positions.
  */
 export function generateDeviceConfig(
   horizontalBytes: ByteAnalysis[],
@@ -243,9 +250,10 @@ export function generateDeviceConfig(
   tiltXBytes: ByteAnalysis[],
   tiltYBytes: ByteAnalysis[],
   statusByteValues: Map<number, StatusValue>,
-  allPackets: Uint8Array[]
+  allPackets: Uint8Array[],
+  tabletButtonBytes: ByteAnalysis[] = []
 ): DeviceByteCodeMappings {
-  // Group consecutive bytes for multi-byte values (0-based internally)
+  // Group consecutive bytes for multi-byte values
   const xBytes = groupConsecutiveBytes(horizontalBytes);
   const yBytes = groupConsecutiveBytes(verticalBytes);
   const pressureByteIndices = groupConsecutiveBytes(pressureBytes);
@@ -255,20 +263,20 @@ export function generateDeviceConfig(
   const yMax = calculateMultiByteMax(yBytes, verticalBytes);
   const pressureMax = calculateMultiByteMax(pressureByteIndices, pressureBytes);
 
-  // Convert to 1-based indexing for JSON spec
+  // Use 0-based indexing
   const config: DeviceByteCodeMappings = {
     x: {
-      byteIndex: xBytes.map(i => i + 1),
+      byteIndex: xBytes,
       max: xMax,
       type: 'multi-byte-range',
     },
     y: {
-      byteIndex: yBytes.map(i => i + 1),
+      byteIndex: yBytes,
       max: yMax,
       type: 'multi-byte-range',
     },
     pressure: {
-      byteIndex: pressureByteIndices.map(i => i + 1),
+      byteIndex: pressureByteIndices,
       max: pressureMax,
       type: 'multi-byte-range',
     },
@@ -293,7 +301,7 @@ export function generateDeviceConfig(
       });
 
       config.status = {
-        byteIndex: [statusByteIndex + 1], // Convert to 1-based indexing
+        byteIndex: [statusByteIndex], // Use 0-based indexing
         type: 'code',
         values,
       };
@@ -304,7 +312,7 @@ export function generateDeviceConfig(
   if (tiltXBytes.length > 0) {
     const tiltXIndices = tiltXBytes.map(b => b.byteIndex);
     config.tiltX = {
-      byteIndex: tiltXIndices.map(i => i + 1), // Convert to 1-based indexing
+      byteIndex: tiltXIndices, // Use 0-based indexing
       positiveMax: 127,
       negativeMin: 128,
       negativeMax: 255,
@@ -316,11 +324,21 @@ export function generateDeviceConfig(
   if (tiltYBytes.length > 0) {
     const tiltYIndices = tiltYBytes.map(b => b.byteIndex);
     config.tiltY = {
-      byteIndex: tiltYIndices.map(i => i + 1), // Convert to 1-based indexing
+      byteIndex: tiltYIndices, // Use 0-based indexing
       positiveMax: 127,
       negativeMin: 128,
       negativeMax: 255,
       type: 'bipolar-range',
+    };
+  }
+
+  // Add tablet buttons if detected
+  if (tabletButtonBytes.length > 0) {
+    const buttonByteIndices = tabletButtonBytes.map(b => b.byteIndex);
+    config.tabletButtons = {
+      byteIndex: buttonByteIndices, // Use 0-based indexing
+      buttonCount: 8, // Default to 8 buttons
+      type: 'bit-flags',
     };
   }
 

@@ -223,6 +223,15 @@ export class MockTabletDevice {
   }
 
   /**
+   * Play a sequence of tablet button presses
+   * Simulates pressing each express key on the tablet
+   */
+  playTabletButtons(buttonCount = 8, duration = 2000): void {
+    const gen = this.generator.generateTabletButtonSequence(buttonCount, duration);
+    this.play(gen);
+  }
+
+  /**
    * Send a single packet
    */
   sendPacket(x: number, y: number, pressure: number, tiltX = 0, tiltY = 0): void {

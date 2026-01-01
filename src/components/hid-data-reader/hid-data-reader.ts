@@ -26,7 +26,7 @@ import '../hid-walkthrough-progress/hid-walkthrough-progress.js';
 import '../device-metadata-form/device-metadata-form.js';
 import type { MetadataFormData } from '../device-metadata-form/device-metadata-form.js';
 
-type WalkthroughStep = 'idle' | 'step1-horizontal' | 'step2-vertical' | 'step3-pressure' | 'step4-hover-horizontal' | 'step5-hover-vertical' | 'step6-tilt-x' | 'step7-tilt-y' | 'step8-primary-button' | 'step9-secondary-button' | 'step10-metadata' | 'complete';
+type WalkthroughStep = 'idle' | 'step1-horizontal' | 'step2-vertical' | 'step3-pressure' | 'step4-hover-movement' | 'step5-tilt-x' | 'step6-tilt-y' | 'step7-primary-button' | 'step8-secondary-button' | 'step9-tablet-buttons' | 'step10-metadata' | 'complete';
 
 /**
  * HID Data Reader component for visualizing raw HID bytes
@@ -73,6 +73,12 @@ export class HidDataReader extends LitElement {
   private tiltYBytes: ByteAnalysis[] = [];
 
   @state()
+  private tabletButtonBytes: ByteAnalysis[] = [];
+
+  @state()
+  private detectedButtonStates: Set<number> = new Set();
+
+  @state()
   private deviceConfig: DeviceByteCodeMappings | null = null;
 
   @state()
@@ -109,6 +115,9 @@ export class HidDataReader extends LitElement {
   // Track which devices sent data during walkthrough
   private activeDeviceIndices: Set<number> = new Set();
 
+  // Track the most recent device that sent data (for bytes display)
+  private currentActiveDeviceIndex: number | undefined = undefined;
+
   // Store device metadata for configuration generation
   private deviceMetadata: {
     vendorId?: number;
@@ -141,7 +150,7 @@ export class HidDataReader extends LitElement {
       <div class="content">
         ${this._renderWalkthrough()}
 
-        ${this.isRealDevice && this.deviceDataStreams.size > 0
+        ${this.deviceDataStreams.size > 0
           ? this._renderDeviceStreams()
           : ''
         }
@@ -152,27 +161,16 @@ export class HidDataReader extends LitElement {
   private _renderDeviceStatus() {
     return html`
       <div class="device-status">
-        ${this.isRealDevice
+        ${!this.isRealDevice
           ? html`
-              <div class="status-badge connected">
-                <span class="status-icon">✓</span>
-                <span>Connected: ${this.realDeviceName}</span>
-                ${this.realDevice?.opened
-                  ? html`<span class="status-detail">• Opened</span>`
-                  : html`<span class="status-detail warning">• Not Opened</span>`}
-              </div>
-              <button class="button small disconnect" @click="${this._disconnectRealDevice}">
-                Disconnect
-              </button>
-            `
-          : html`
               <button
                 class="button small connect"
                 ?disabled="${this.isConnecting}"
                 @click="${this._connectRealDevice}">
                 ${this.isConnecting ? '⏳ Connecting...' : '🔌 Connect Real Tablet'}
               </button>
-            `}
+            `
+          : ''}
       </div>
     `;
   }
@@ -184,7 +182,23 @@ export class HidDataReader extends LitElement {
 
     return html`
       <div class="section">
-        <h3>Device Interfaces</h3>
+        <div class="section-header-with-actions">
+          <h3>Device Interfaces</h3>
+          <div class="header-actions">
+            ${this.isRealDevice ? html`
+              <div class="status-badge connected">
+                <span class="status-icon">✓</span>
+                <span>Connected: ${this.realDeviceName}</span>
+                ${this.realDevice?.opened
+                  ? html`<span class="status-detail">• Opened</span>`
+                  : html`<span class="status-detail warning">• Not Opened</span>`}
+              </div>
+              <button class="button small disconnect" @click="${this._disconnectRealDevice}">
+                Disconnect
+              </button>
+            ` : ''}
+          </div>
+        </div>
 
         <!-- Minimal device list -->
         <div class="device-list-minimal">
@@ -194,73 +208,57 @@ export class HidDataReader extends LitElement {
           <div class="device-chips">
             ${streams.map(([index, stream]) => {
               const isActive = stream.packetCount > 0;
-              const device = this.realDevices[index];
+              const isMock = index === -1;
+              const device = isMock ? null : this.realDevices[index];
               const collection = device?.collections[0];
               const isDigitizer = collection?.usagePage === 13 && collection?.usage === 2;
+              const deviceLabel = isMock ? 'Simulated' : `Device ${index}`;
 
               return html`
-                <div class="device-chip ${isActive ? 'active' : 'inactive'}">
+                <div class="device-chip ${isActive ? 'active' : 'inactive'} ${isMock ? 'mock' : ''}">
                   <span class="chip-icon">${isActive ? '✅' : '⚪'}</span>
-                  <span class="chip-label">Device ${index}</span>
+                  <span class="chip-label">${deviceLabel}</span>
                   ${isDigitizer ? html`<span class="chip-badge">Pen</span>` : ''}
+                  ${isMock ? html`<span class="chip-badge mock-badge">Mock</span>` : ''}
                   ${isActive ? html`<span class="chip-count">${stream.packetCount}</span>` : ''}
+                </div>
+              `;
+            })}
+          </div>
+
+          <!-- Device details -->
+          <div class="device-details">
+            ${streams.map(([index, stream]) => {
+              const isMock = index === -1;
+              const device = isMock ? null : this.realDevices[index];
+              const collection = device?.collections[0];
+              const isDigitizer = collection?.usagePage === 13 && collection?.usage === 2;
+              const deviceLabel = isMock ? 'Simulated' : `Device ${index}`;
+
+              return html`
+                <div class="device-detail-row">
+                  <span class="detail-label">${deviceLabel}:</span>
+                  ${isMock ? html`
+                    <span class="detail-value">Mock Data Generator</span>
+                    <span class="detail-value">Usage Page: 13</span>
+                    <span class="detail-value">Usage: 2</span>
+                    <span class="detail-value">Packets: ${stream.packetCount}</span>
+                    <span class="detail-badge mock-badge">Simulated Pen</span>
+                  ` : html`
+                    <span class="detail-value">Usage Page: ${collection?.usagePage ?? 'N/A'}</span>
+                    <span class="detail-value">Usage: ${collection?.usage ?? 'N/A'}</span>
+                    <span class="detail-value">Packets: ${stream.packetCount}</span>
+                    ${isDigitizer ? html`<span class="detail-badge">Digitizer - Pen</span>` : ''}
+                  `}
                 </div>
               `;
             })}
           </div>
         </div>
 
-        <!-- Active device streams (full detail) -->
-        ${hasActiveStreams ? html`
-          <div class="active-streams-section">
-            <h4>Active Data Stream${activeStreams.length !== 1 ? 's' : ''}</h4>
-            <div class="device-streams-list">
-              ${activeStreams.map(([index, stream]) => {
-                const device = this.realDevices[index];
-                const collection = device?.collections[0];
+        <!-- Raw byte data display -->
+        ${this._renderLiveAnalysis()}
 
-                return html`
-                  <div class="device-stream-panel active">
-                    <div class="stream-header">
-                      <div class="stream-title-row">
-                        <span class="stream-title">
-                          ✅ Device ${index}
-                          <span class="badge active-badge">ACTIVE</span>
-                        </span>
-                        <span class="stream-count">${stream.packetCount} packets</span>
-                      </div>
-                      ${device ? html`
-                        <div class="stream-metadata">
-                          <span class="metadata-item">
-                            <span class="metadata-label">Usage Page:</span>
-                            <span class="metadata-value">${collection?.usagePage || 'N/A'}</span>
-                          </span>
-                          <span class="metadata-item">
-                            <span class="metadata-label">Usage:</span>
-                            <span class="metadata-value">${collection?.usage || 'N/A'}</span>
-                          </span>
-                          ${collection?.usagePage === 13 && collection?.usage === 2
-                            ? html`<span class="metadata-badge digitizer">Digitizer - Pen</span>`
-                            : ''}
-                        </div>
-                      ` : ''}
-                    </div>
-                    <div class="stream-byte-display">
-                      <div class="byte-packet">
-                        <span class="packet-label">Latest Packet:</span>
-                        <span class="packet-bytes">${stream.lastPacket}</span>
-                      </div>
-                    </div>
-                  </div>
-                `;
-              })}
-            </div>
-          </div>
-        ` : html`
-          <p class="info-message">
-            ℹ️ Move your stylus over the tablet to see which device interface sends data.
-          </p>
-        `}
       </div>
     `;
   }
@@ -271,15 +269,18 @@ export class HidDataReader extends LitElement {
     if (this.activeDeviceIndices.size === 0) return '';
 
     const activeDevices = Array.from(this.activeDeviceIndices).map(index => {
-      const device = this.realDevices[index];
-      if (!device) return null;
+      const isMock = index === -1;
+      const device = isMock ? null : this.realDevices[index];
 
-      const collection = device.collections[0];
+      if (!isMock && !device) return null;
+
+      const collection = device?.collections[0];
       return {
         index,
-        usagePage: collection?.usagePage,
-        usage: collection?.usage,
-        opened: device.opened
+        isMock,
+        usagePage: isMock ? 13 : collection?.usagePage,
+        usage: isMock ? 2 : collection?.usage,
+        opened: device?.opened
       };
     }).filter(d => d !== null);
 
@@ -289,9 +290,13 @@ export class HidDataReader extends LitElement {
       <div style="margin-top: 10px; padding-top: 10px; border-top: 1px solid rgba(0,0,0,0.1);">
         ${activeDevices.map(device => html`
           <div style="font-size: 13px; margin-top: 5px;">
-            <strong>Device ${device.index}:</strong>
+            <strong>${device.isMock ? 'Simulated' : `Device ${device.index}`}:</strong>
             Usage Page ${device.usagePage}, Usage ${device.usage}
-            ${device.usagePage === 13 && device.usage === 2 ? html`<span style="color: #2e7d32;"> (Digitizer - Pen)</span>` : ''}
+            ${device.usagePage === 13 && device.usage === 2 ? html`
+              <span style="color: ${device.isMock ? '#ff9800' : '#2e7d32'};">
+                ${device.isMock ? ' (Simulated Pen)' : ' (Digitizer - Pen)'}
+              </span>
+            ` : ''}
           </div>
         `)}
       </div>
@@ -315,7 +320,6 @@ export class HidDataReader extends LitElement {
               ${this.isPlaying ? '⏳ Simulating...' : '🤖 Simulate this data'}
             </button>
           </div>
-          ${this._renderLiveAnalysis()}
         </div>
       `;
     }
@@ -336,7 +340,6 @@ export class HidDataReader extends LitElement {
               ${this.isPlaying ? '⏳ Simulating...' : '🤖 Simulate this data'}
             </button>
           </div>
-          ${this._renderLiveAnalysis()}
         </div>
       `;
     }
@@ -357,61 +360,41 @@ export class HidDataReader extends LitElement {
               ${this.isPlaying ? '⏳ Simulating...' : '🤖 Simulate this data'}
             </button>
           </div>
-          ${this._renderLiveAnalysis()}
         </div>
       `;
     }
 
-    if (this.walkthroughStep === 'step4-hover-horizontal') {
+    if (this.walkthroughStep === 'step4-hover-movement') {
       const hasData = this.capturedPackets.length > 0;
       return html`
         <div class="section walkthrough active">
           <div class="step-header">
-            <h3>Step 4: Hover Horizontal Movement</h3>
+            <h3>Step 4: Hover Movement</h3>
             <button class="icon-button" @click="${this._resetCapture}" title="Reset">🔄</button>
             <hid-walkthrough-progress currentStep="3" totalSteps="10"></hid-walkthrough-progress>
-            <button class="icon-button" ?disabled="${!hasData}" @click="${() => this._completeManualStep('hover-horizontal')}" title="Next Step">→</button>
+            <button class="icon-button" ?disabled="${!hasData}" @click="${() => this._completeManualStep('hover-movement')}" title="Next Step">→</button>
           </div>
           <div class="step-description">
-            <p>This helps confirm X coordinate bytes by comparing hover vs contact data.</p>
-            <button class="simulate-button" ?disabled="${this.isPlaying}" @click="${() => this._playGesture('hover-horizontal')}">
-              ${this.isPlaying ? '⏳ Simulating...' : '🤖 Simulate this data'}
-            </button>
+            <p>Hover your pen above the tablet and move it around freely (both horizontally and vertically).</p>
+            <p>This helps identify X and Y coordinate bytes without pressure interference.</p>
+            <div class="button-group">
+              <button class="simulate-button" ?disabled="${this.isPlaying}" @click="${() => this._playGesture('circle')}">
+                ${this.isPlaying ? '⏳ Simulating...' : '🤖 Simulate this data'}
+              </button>
+            </div>
           </div>
-          ${this._renderLiveAnalysis()}
         </div>
       `;
     }
 
-    if (this.walkthroughStep === 'step5-hover-vertical') {
+    if (this.walkthroughStep === 'step5-tilt-x') {
       const hasData = this.capturedPackets.length > 0;
       return html`
         <div class="section walkthrough active">
           <div class="step-header">
-            <h3>Step 5: Hover Vertical Movement</h3>
+            <h3>Step 5: Tilt X Detection</h3>
             <button class="icon-button" @click="${this._resetCapture}" title="Reset">🔄</button>
             <hid-walkthrough-progress currentStep="4" totalSteps="10"></hid-walkthrough-progress>
-            <button class="icon-button" ?disabled="${!hasData}" @click="${() => this._completeManualStep('hover-vertical')}" title="Next Step">→</button>
-          </div>
-          <div class="step-description">
-            <p>This confirms Y coordinate bytes by comparing hover vs contact data.</p>
-            <button class="simulate-button" ?disabled="${this.isPlaying}" @click="${() => this._playGesture('hover-vertical')}">
-              ${this.isPlaying ? '⏳ Simulating...' : '🤖 Simulate this data'}
-            </button>
-          </div>
-          ${this._renderLiveAnalysis()}
-        </div>
-      `;
-    }
-
-    if (this.walkthroughStep === 'step6-tilt-x') {
-      const hasData = this.capturedPackets.length > 0;
-      return html`
-        <div class="section walkthrough active">
-          <div class="step-header">
-            <h3>Step 6: Tilt X Detection</h3>
-            <button class="icon-button" @click="${this._resetCapture}" title="Reset">🔄</button>
-            <hid-walkthrough-progress currentStep="5" totalSteps="10"></hid-walkthrough-progress>
             <button class="icon-button" ?disabled="${!hasData}" @click="${() => this._completeManualStep('tilt-x')}" title="Next Step">→</button>
           </div>
           <div class="step-description">
@@ -420,19 +403,18 @@ export class HidDataReader extends LitElement {
               ${this.isPlaying ? '⏳ Simulating...' : '🤖 Simulate this data'}
             </button>
           </div>
-          ${this._renderLiveAnalysis()}
         </div>
       `;
     }
 
-    if (this.walkthroughStep === 'step7-tilt-y') {
+    if (this.walkthroughStep === 'step6-tilt-y') {
       const hasData = this.capturedPackets.length > 0;
       return html`
         <div class="section walkthrough active">
           <div class="step-header">
-            <h3>Step 7: Tilt Y Detection</h3>
+            <h3>Step 6: Tilt Y Detection</h3>
             <button class="icon-button" @click="${this._resetCapture}" title="Reset">🔄</button>
-            <hid-walkthrough-progress currentStep="6" totalSteps="10"></hid-walkthrough-progress>
+            <hid-walkthrough-progress currentStep="5" totalSteps="10"></hid-walkthrough-progress>
             <button class="icon-button" ?disabled="${!hasData}" @click="${() => this._completeManualStep('tilt-y')}" title="Next Step">→</button>
           </div>
           <div class="step-description">
@@ -441,19 +423,18 @@ export class HidDataReader extends LitElement {
               ${this.isPlaying ? '⏳ Simulating...' : '🤖 Simulate this data'}
             </button>
           </div>
-          ${this._renderLiveAnalysis()}
         </div>
       `;
     }
 
-    if (this.walkthroughStep === 'step8-primary-button') {
+    if (this.walkthroughStep === 'step7-primary-button') {
       const hasData = this.capturedPackets.length > 0;
       return html`
         <div class="section walkthrough active">
           <div class="step-header">
-            <h3>Step 8: Primary Button Detection</h3>
+            <h3>Step 7: Primary Button Detection</h3>
             <button class="icon-button" @click="${this._resetCapture}" title="Reset">🔄</button>
-            <hid-walkthrough-progress currentStep="7" totalSteps="10"></hid-walkthrough-progress>
+            <hid-walkthrough-progress currentStep="6" totalSteps="10"></hid-walkthrough-progress>
             <button class="icon-button" ?disabled="${!hasData}" @click="${() => this._completeManualStep('primary-button')}" title="Next Step">→</button>
           </div>
           <div class="step-description">
@@ -462,19 +443,18 @@ export class HidDataReader extends LitElement {
               ${this.isPlaying ? '⏳ Simulating...' : '🤖 Simulate this data'}
             </button>
           </div>
-          ${this._renderLiveAnalysis()}
         </div>
       `;
     }
 
-    if (this.walkthroughStep === 'step9-secondary-button') {
+    if (this.walkthroughStep === 'step8-secondary-button') {
       const hasData = this.capturedPackets.length > 0;
       return html`
         <div class="section walkthrough active">
           <div class="step-header">
-            <h3>Step 9: Secondary Button Detection</h3>
+            <h3>Step 8: Secondary Button Detection</h3>
             <button class="icon-button" @click="${this._resetCapture}" title="Reset">🔄</button>
-            <hid-walkthrough-progress currentStep="8" totalSteps="10"></hid-walkthrough-progress>
+            <hid-walkthrough-progress currentStep="7" totalSteps="10"></hid-walkthrough-progress>
             <button class="icon-button" ?disabled="${!hasData}" @click="${() => this._completeManualStep('secondary-button')}" title="Next Step">→</button>
           </div>
           <div class="step-description">
@@ -483,7 +463,48 @@ export class HidDataReader extends LitElement {
               ${this.isPlaying ? '⏳ Simulating...' : '🤖 Simulate this data'}
             </button>
           </div>
-          ${this._renderLiveAnalysis()}
+        </div>
+      `;
+    }
+
+    if (this.walkthroughStep === 'step9-tablet-buttons') {
+      const hasData = this.capturedPackets.length > 0;
+      const buttonCount = this.detectedButtonStates.size;
+      const buttonStates = Array.from(this.detectedButtonStates).sort((a, b) => a - b);
+
+      return html`
+        <div class="section walkthrough active">
+          <div class="step-header">
+            <h3>Step 9: Tablet Buttons</h3>
+            <button class="icon-button" @click="${this._resetCapture}" title="Reset">🔄</button>
+            <hid-walkthrough-progress currentStep="8" totalSteps="10"></hid-walkthrough-progress>
+            <button class="icon-button" ?disabled="${!hasData}" @click="${() => this._completeManualStep('tablet-buttons')}" title="Next Step">→</button>
+          </div>
+          <div class="step-description">
+            <p>This will help us identify which byte contains the <strong>tablet button states</strong>.</p>
+            <p><strong>Instructions:</strong> Press each button on your tablet (the express keys on the device itself, not the stylus buttons). Try to press all buttons at least once.</p>
+            <p class="note">💡 If your tablet doesn't have express keys, you can skip this step by clicking the → button.</p>
+          </div>
+
+          ${buttonCount > 0 ? html`
+            <div class="detection-feedback" style="margin: 1rem 0; padding: 1rem; background: #e8f5e9; border-radius: 4px; border-left: 4px solid #4caf50;">
+              <div style="font-weight: 600; color: #2e7d32; margin-bottom: 0.5rem;">
+                ✓ Detected ${buttonCount} button state${buttonCount !== 1 ? 's' : ''}
+              </div>
+              <div style="font-size: 0.9rem; color: #555;">
+                Button values: ${buttonStates.map(v => `0x${v.toString(16).toUpperCase()}`).join(', ')}
+              </div>
+              <div style="font-size: 0.85rem; color: #666; margin-top: 0.5rem;">
+                💡 Each value represents a different button or button combination
+              </div>
+            </div>
+          ` : ''}
+
+          <div class="gesture-controls">
+            <button class="simulate-button" ?disabled="${this.isPlaying}" @click="${() => this._playGesture('tablet-buttons')}">
+              ${this.isPlaying ? '⏳ Simulating...' : '🤖 Simulate this data'}
+            </button>
+          </div>
         </div>
       `;
     }
@@ -655,8 +676,16 @@ export class HidDataReader extends LitElement {
   private _setupMockDevice() {
     this.mockDevice = new MockTabletDevice();
 
+    // Initialize mock device stream with index -1
+    this.deviceDataStreams.set(-1, {
+      lastPacket: '',
+      packetCount: 0,
+      lastUpdate: Date.now()
+    });
+
     this.mockDevice.addEventListener('inputreport', (dataArray: Uint8Array) => {
-      this._handleRawBytes(dataArray);
+      // Route mock data through device data handler with index -1
+      this._handleDeviceData(-1, dataArray);
     });
   }
 
@@ -678,10 +707,7 @@ export class HidDataReader extends LitElement {
     if (!this.deviceFinder) return;
 
     try {
-      const found = await this.deviceFinder.checkForExistingDevices();
-      if (found) {
-        console.log('[HIDDataReader] Auto-connected to existing device');
-      }
+      await this.deviceFinder.checkForExistingDevices();
     } catch (error) {
       console.error('[HIDDataReader] Error checking for devices:', error);
     }
@@ -694,12 +720,7 @@ export class HidDataReader extends LitElement {
 
     try {
       // Request device with optional filters (empty array shows all HID devices)
-      const result = await this.deviceFinder.requestDevice([]);
-      if (!result) {
-        console.log('[HIDDataReader] No device selected');
-      } else {
-        console.log('[HIDDataReader] Device selected and connected');
-      }
+      await this.deviceFinder.requestDevice([]);
     } catch (error) {
       console.error('[HIDDataReader] Error connecting device:', error);
       alert('Failed to connect to device. Please try again.');
@@ -709,21 +730,6 @@ export class HidDataReader extends LitElement {
   }
 
   private async _handleDeviceConnected(result: DeviceConnectionResult) {
-    console.log('[HIDDataReader] Device connected:', result.deviceInfo);
-    console.log('[HIDDataReader] Primary device:', result.primaryDevice);
-    console.log('[HIDDataReader] All devices:', result.allDevices);
-
-    // Log all devices and their collections
-    result.allDevices.forEach((device, index) => {
-      console.log(`[HIDDataReader] Device ${index}:`, {
-        opened: device.opened,
-        vendorId: device.vendorId,
-        productId: device.productId,
-        productName: device.productName,
-        collections: device.collections
-      });
-    });
-
     this.realDevice = result.primaryDevice;
     this.realDevices = result.allDevices;
     this.realDeviceName = result.deviceInfo.name;
@@ -745,16 +751,17 @@ export class HidDataReader extends LitElement {
         .filter((v): v is number => v !== undefined)
         .filter((v, i, a) => a.indexOf(v) === i) // unique values
     };
-    console.log('[HIDDataReader] Captured device metadata:', this.deviceMetadata);
 
     // Initialize device data streams
+    // Preserve the mock device stream (index -1) if it exists
+    const mockStream = this.deviceDataStreams.get(-1);
     this.deviceDataStreams.clear();
+    if (mockStream) {
+      this.deviceDataStreams.set(-1, mockStream);
+    }
     result.allDevices.forEach((_, index) => {
       this.deviceDataStreams.set(index, { lastPacket: '', packetCount: 0, lastUpdate: 0 });
     });
-
-    // Log device collections to understand what reports it sends
-    console.log('[HIDDataReader] Primary device collections:', this.realDevice.collections);
 
     // Force a re-render to show connection status
     this.requestUpdate();
@@ -767,37 +774,25 @@ export class HidDataReader extends LitElement {
         const dataArray = new Uint8Array(event.data.buffer);
         this._handleDeviceData(index, dataArray);
       });
-      console.log(`[HIDDataReader] Event listener attached to device ${index}`);
     });
-
-    console.log('[HIDDataReader] Event listeners attached to all devices');
 
     // Wait a microtask to ensure listener is registered
     await new Promise(resolve => setTimeout(resolve, 10));
 
     // NOW open the device to start receiving data
-    console.log('[HIDDataReader] Device opened status before open:', this.realDevice.opened);
     if (!this.realDevice.opened) {
       try {
-        console.log('[HIDDataReader] Attempting to open device...');
         await this.realDevice.open();
-        console.log('[HIDDataReader] Device opened successfully!');
-        console.log('[HIDDataReader] Device opened status after open:', this.realDevice.opened);
-        console.log('[HIDDataReader] 📝 Now move your stylus over the tablet to see input reports...');
         // Force re-render to update status
         this.requestUpdate();
       } catch (error) {
         console.error('[HIDDataReader] Error opening device:', error);
         alert(`Failed to open device: ${error instanceof Error ? error.message : String(error)}`);
       }
-    } else {
-      console.log('[HIDDataReader] Device already opened');
-      console.log('[HIDDataReader] 📝 Now move your stylus over the tablet to see input reports...');
     }
   }
 
   private _handleDeviceDisconnected() {
-    console.log('[HIDDataReader] Device disconnected');
     this.isRealDevice = false;
     this.realDeviceName = '';
     this.realDevice = undefined;
@@ -832,16 +827,20 @@ export class HidDataReader extends LitElement {
     // Track which devices are active during walkthrough
     if (this.walkthroughStep !== 'idle' && this.walkthroughStep !== 'step10-metadata' && this.walkthroughStep !== 'complete') {
       this.activeDeviceIndices.add(deviceIndex);
+      // Update the current active device whenever data comes in during walkthrough
+      this.currentActiveDeviceIndex = deviceIndex;
     }
 
     // Capture report ID from first packet (if not already captured)
     if (!this.deviceMetadata.detectedReportId && data.length > 0) {
       this.deviceMetadata.detectedReportId = data[0];
-      console.log('[HIDDataReader] Detected report ID:', data[0]);
     }
 
     // Also update the main display (for backwards compatibility)
     this._handleRawBytes(data);
+
+    // Force a re-render to update device info in bytes display
+    this.requestUpdate();
   }
 
   private _handleRawBytes(data: Uint8Array) {
@@ -854,6 +853,16 @@ export class HidDataReader extends LitElement {
 
     // Update current display with latest packet
     this.currentBytes = hexString;
+
+    // Track button states in real-time during tablet buttons step
+    if (this.walkthroughStep === 'step10-tablet-buttons' && data.length > 9) {
+      // Button data is typically in byte 9 (0-based index) for our mock device
+      const buttonByte = data[9];
+      if (buttonByte > 0) {
+        // Add this button state to our set
+        this.detectedButtonStates = new Set([...this.detectedButtonStates, buttonByte]);
+      }
+    }
 
     // Capture packets during walkthrough steps
     const isInWalkthroughStep = this.walkthroughStep !== 'idle' && this.walkthroughStep !== 'step10-metadata' && this.walkthroughStep !== 'complete';
@@ -880,23 +889,23 @@ export class HidDataReader extends LitElement {
     if (this.walkthroughStep === 'step3-pressure' && gesture !== 'pressure') {
       return; // Only allow pressure in step 3
     }
-    if (this.walkthroughStep === 'step4-hover-horizontal' && gesture !== 'hover-horizontal') {
-      return; // Only allow hover horizontal in step 4
+    if (this.walkthroughStep === 'step4-hover-movement' && !['hover-horizontal', 'hover-vertical', 'circle'].includes(gesture)) {
+      return; // Allow any hover movement in step 4
     }
-    if (this.walkthroughStep === 'step5-hover-vertical' && gesture !== 'hover-vertical') {
-      return; // Only allow hover vertical in step 5
+    if (this.walkthroughStep === 'step5-tilt-x' && gesture !== 'tilt-x') {
+      return; // Only allow tilt X in step 5
     }
-    if (this.walkthroughStep === 'step6-tilt-x' && gesture !== 'tilt-x') {
-      return; // Only allow tilt X in step 6
+    if (this.walkthroughStep === 'step6-tilt-y' && gesture !== 'tilt-y') {
+      return; // Only allow tilt Y in step 6
     }
-    if (this.walkthroughStep === 'step7-tilt-y' && gesture !== 'tilt-y') {
-      return; // Only allow tilt Y in step 7
+    if (this.walkthroughStep === 'step7-primary-button' && gesture !== 'primary-button') {
+      return; // Only allow primary button in step 7
     }
-    if (this.walkthroughStep === 'step8-primary-button' && gesture !== 'primary-button') {
-      return; // Only allow primary button in step 8
+    if (this.walkthroughStep === 'step8-secondary-button' && gesture !== 'secondary-button') {
+      return; // Only allow secondary button in step 8
     }
-    if (this.walkthroughStep === 'step9-secondary-button' && gesture !== 'secondary-button') {
-      return; // Only allow secondary button in step 9
+    if (this.walkthroughStep === 'step9-tablet-buttons' && gesture !== 'tablet-buttons') {
+      return; // Only allow tablet buttons in step 10
     }
 
     // Just inject data - don't auto-start or auto-complete
@@ -949,6 +958,9 @@ export class HidDataReader extends LitElement {
         break;
       case 'secondary-button':
         this.mockDevice.playSecondaryButtonDrag();
+        break;
+      case 'tablet-buttons':
+        this.mockDevice.playTabletButtons();
         break;
       default:
         this.mockDevice.playCircle();
@@ -1006,37 +1018,26 @@ export class HidDataReader extends LitElement {
       const filteredAnalysis = analysis.filter(b => !knownByteIndices.has(b.byteIndex));
       // Store best guess bytes for pressure (top 2 bytes)
       this.pressureBytes = getBestGuessBytesByVariance(filteredAnalysis, 2);
-      this.walkthroughStep = 'step4-hover-horizontal';
+      this.walkthroughStep = 'step4-hover-movement';
       this.capturedPackets = [];
-    } else if (this.walkthroughStep === 'step4-hover-horizontal' && gesture === 'hover-horizontal') {
+    } else if (this.walkthroughStep === 'step4-hover-movement' && (gesture === 'hover-horizontal' || gesture === 'hover-vertical' || gesture === 'circle' || gesture === 'hover-movement')) {
       this.lastCapturedPackets = [...this.capturedPackets];
 
       // Track status byte for hover FIRST
       this._trackStatusByte('hover');
 
-      // Now analyze bytes, excluding the status byte (byte 0)
-      const analysis = analyzeBytes(this.capturedPackets);
-      const filteredAnalysis = analysis.filter(b => b.byteIndex !== 0);
-      // Store bytes that changed during horizontal hover (X coordinate only, no pressure)
-      this.hoverHorizontalBytes = getBestGuessBytesByVariance(filteredAnalysis, 2);
+      // Use the X and Y bytes we already detected in steps 1 and 2
+      // Step 4 is just to verify they work in hover mode (without pressure)
+      // We don't need to re-detect them
+      this.hoverHorizontalBytes = this.horizontalBytes;
+      this.hoverVerticalBytes = this.verticalBytes;
 
-      this.walkthroughStep = 'step5-hover-vertical';
+      // Note: horizontalBytes and verticalBytes are already set from steps 1 and 2
+      // No need to call _identifyCoordinateAndPressureBytes() since they're already correct
+
+      this.walkthroughStep = 'step5-tilt-x';
       this.capturedPackets = [];
-    } else if (this.walkthroughStep === 'step5-hover-vertical' && gesture === 'hover-vertical') {
-      this.lastCapturedPackets = [...this.capturedPackets];
-      const analysis = analyzeBytes(this.capturedPackets);
-      // Exclude status byte (byte 0) AND X coordinate bytes
-      const knownByteIndices = new Set([0, ...this.horizontalBytes.map(b => b.byteIndex)]);
-      const filteredAnalysis = analysis.filter(b => !knownByteIndices.has(b.byteIndex));
-      // Store bytes that changed during vertical hover (Y coordinate only, no pressure)
-      this.hoverVerticalBytes = getBestGuessBytesByVariance(filteredAnalysis, 2);
-
-      // Identify X, Y, and pressure before moving to tilt
-      this._identifyCoordinateAndPressureBytes();
-
-      this.walkthroughStep = 'step6-tilt-x';
-      this.capturedPackets = [];
-    } else if (this.walkthroughStep === 'step6-tilt-x' && gesture === 'tilt-x') {
+    } else if (this.walkthroughStep === 'step5-tilt-x' && gesture === 'tilt-x') {
       this.lastCapturedPackets = [...this.capturedPackets];
       const analysis = analyzeBytes(this.capturedPackets);
       // Filter out already-identified bytes (status byte 0, X, Y, pressure)
@@ -1048,9 +1049,9 @@ export class HidDataReader extends LitElement {
       ]);
       const tiltOnlyBytes = analysis.filter(b => !knownByteIndices.has(b.byteIndex));
       this.tiltXBytes = getBestGuessBytesByVariance(tiltOnlyBytes, 1); // Just the top byte
-      this.walkthroughStep = 'step7-tilt-y';
+      this.walkthroughStep = 'step6-tilt-y';
       this.capturedPackets = [];
-    } else if (this.walkthroughStep === 'step7-tilt-y' && gesture === 'tilt-y') {
+    } else if (this.walkthroughStep === 'step6-tilt-y' && gesture === 'tilt-y') {
       this.lastCapturedPackets = [...this.capturedPackets];
       const analysis = analyzeBytes(this.capturedPackets);
       // Filter out already-identified bytes (status byte 0, X, Y, pressure, AND tilt-X)
@@ -1059,7 +1060,7 @@ export class HidDataReader extends LitElement {
         ...this.horizontalBytes.map(b => b.byteIndex),
         ...this.verticalBytes.map(b => b.byteIndex),
         ...this.pressureBytes.map(b => b.byteIndex),
-        ...this.tiltXBytes.map(b => b.byteIndex), // Exclude tilt-X from step 6
+        ...this.tiltXBytes.map(b => b.byteIndex), // Exclude tilt-X from step 5
       ]);
       const tiltOnlyBytes = analysis.filter(b => !knownByteIndices.has(b.byteIndex));
       this.tiltYBytes = getBestGuessBytesByVariance(tiltOnlyBytes, 1); // Just the top byte
@@ -1067,9 +1068,9 @@ export class HidDataReader extends LitElement {
       // Identify tilt bytes
       this._identifyTiltBytes();
 
-      this.walkthroughStep = 'step8-primary-button';
+      this.walkthroughStep = 'step7-primary-button';
       this.capturedPackets = [];
-    } else if (this.walkthroughStep === 'step8-primary-button' && gesture === 'primary-button') {
+    } else if (this.walkthroughStep === 'step7-primary-button' && gesture === 'primary-button') {
       this.lastCapturedPackets = [...this.capturedPackets];
       // Track status byte values for primary button (both hover and contact states)
       if (this.capturedPackets.length > 0) {
@@ -1104,9 +1105,9 @@ export class HidDataReader extends LitElement {
           });
         }
       }
-      this.walkthroughStep = 'step9-secondary-button';
+      this.walkthroughStep = 'step8-secondary-button';
       this.capturedPackets = [];
-    } else if (this.walkthroughStep === 'step9-secondary-button' && gesture === 'secondary-button') {
+    } else if (this.walkthroughStep === 'step8-secondary-button' && gesture === 'secondary-button') {
       this.lastCapturedPackets = [...this.capturedPackets];
       // Track status byte values for secondary button (both hover and contact states)
       if (this.capturedPackets.length > 0) {
@@ -1142,7 +1143,52 @@ export class HidDataReader extends LitElement {
         }
       }
 
-      // Generate final config with status byte mappings
+      // Move to tablet buttons step
+      this.walkthroughStep = 'step9-tablet-buttons';
+      this.capturedPackets = [];
+    } else if (this.walkthroughStep === 'step9-tablet-buttons' && gesture === 'tablet-buttons') {
+      this.lastCapturedPackets = [...this.capturedPackets];
+
+      // Detect button byte if we have captured packets
+      if (this.capturedPackets.length > 0) {
+        // Add packets to the collection
+        this.allWalkthroughPackets.push(...this.capturedPackets);
+
+        // Filter to only button packets (status byte = 0xF0)
+        // Button packets have a different structure than stylus packets
+        const buttonPackets = this.capturedPackets.filter(p => p[0] === 0xF0);
+
+        if (buttonPackets.length > 0) {
+          // Analyze bytes in button packets only
+          const analysis = analyzeBytes(buttonPackets);
+
+          // Look for bytes with variance and multiple distinct values (bit flags)
+          // Button bytes should have:
+          // 1. Multiple distinct values (one for each button)
+          // 2. Values that are powers of 2 or combinations thereof
+          // 3. Variance > 0
+          const candidateBytes = analysis.filter(b => {
+            if (b.byteIndex === 0) return false; // Skip status byte
+            if (b.variance === 0) return false; // Skip constant bytes
+
+            // Check if values look like bit flags (powers of 2)
+            const uniqueValues = new Set<number>();
+            for (const packet of buttonPackets) {
+              uniqueValues.add(packet[b.byteIndex]);
+            }
+
+            // Button bytes typically have multiple distinct values
+            return uniqueValues.size > 1;
+          });
+
+          if (candidateBytes.length > 0) {
+            // Take the first byte with variance as the button byte
+            this.tabletButtonBytes = [candidateBytes[0]];
+          }
+        }
+      }
+
+      // Generate final config with status byte mappings and button mappings
       this._generateDeviceConfig();
 
       // Move to metadata form step
@@ -1288,7 +1334,8 @@ export class HidDataReader extends LitElement {
       this.tiltXBytes,
       this.tiltYBytes,
       this.statusByteValues,
-      this.allWalkthroughPackets
+      this.allWalkthroughPackets,
+      this.tabletButtonBytes
     );
   }
 
@@ -1308,6 +1355,7 @@ export class HidDataReader extends LitElement {
       'tilt-y': 1500,
       'primary-button': 1500,
       'secondary-button': 1500,
+      'tablet-buttons': 2000, // Time to press all 8 buttons
     };
     return durations[gesture] || 2000;
   }
@@ -1383,9 +1431,27 @@ export class HidDataReader extends LitElement {
       ? this.capturedPackets
       : this.lastCapturedPackets;
 
+    // Get device info for the active device
+    // Use the current active device index (set when data comes in)
+    const activeDeviceIndex = this.currentActiveDeviceIndex;
+    const deviceStream = activeDeviceIndex !== undefined ? this.deviceDataStreams.get(activeDeviceIndex) : undefined;
+
+    // Handle mock device (index -1) vs real devices
+    const isMockDevice = activeDeviceIndex === -1;
+    const device = isMockDevice ? null : (activeDeviceIndex !== undefined ? this.realDevices[activeDeviceIndex] : undefined);
+    const collection = device?.collections[0];
+
+    const deviceInfo = activeDeviceIndex !== undefined ? {
+      deviceNumber: activeDeviceIndex,
+      packetCount: deviceStream?.packetCount || 0,
+      usagePage: isMockDevice ? 13 : collection?.usagePage,
+      usage: isMockDevice ? 2 : collection?.usage,
+      isMock: isMockDevice
+    } : undefined;
+
     if (packetsToShow.length === 0) {
       // Show empty placeholder cells (typical HID packet has 9 bytes)
-      return html`<bytes-display .isEmpty=${true} .placeholderCount=${9}></bytes-display>`;
+      return html`<bytes-display .isEmpty=${true} .placeholderCount=${9} .deviceInfo=${deviceInfo}></bytes-display>`;
     }
 
     // Get the latest packet
@@ -1461,7 +1527,7 @@ export class HidDataReader extends LitElement {
       };
     });
 
-    return html`<bytes-display .bytes=${bytesData}></bytes-display>`;
+    return html`<bytes-display .bytes=${bytesData} .deviceInfo=${deviceInfo}></bytes-display>`;
   }
 
   private _getRealtimeBestGuessLabels(bestGuessBytes: ByteAnalysis[]): Map<number, string> {
@@ -1485,23 +1551,24 @@ export class HidDataReader extends LitElement {
       bestGuessBytes.slice(0, 2).forEach(byte => labels.set(byte.byteIndex, 'Pressure'));
     }
 
-    // Step 4: Hover horizontal - label as X
-    if (this.walkthroughStep === 'step4-hover-horizontal' && this.hoverHorizontalBytes.length === 0) {
-      bestGuessBytes.slice(0, 2).forEach(byte => labels.set(byte.byteIndex, 'X'));
+    // Step 4: Hover movement - label top 4 bytes as X and Y
+    if (this.walkthroughStep === 'step4-hover-movement' && this.hoverHorizontalBytes.length === 0 && this.hoverVerticalBytes.length === 0) {
+      // Label first 2 bytes as X, next 2 as Y
+      if (bestGuessBytes.length >= 2) {
+        bestGuessBytes.slice(0, 2).forEach(byte => labels.set(byte.byteIndex, 'X'));
+      }
+      if (bestGuessBytes.length >= 4) {
+        bestGuessBytes.slice(2, 4).forEach(byte => labels.set(byte.byteIndex, 'Y'));
+      }
     }
 
-    // Step 5: Hover vertical - label as Y
-    if (this.walkthroughStep === 'step5-hover-vertical' && this.hoverVerticalBytes.length === 0) {
-      bestGuessBytes.slice(0, 2).forEach(byte => labels.set(byte.byteIndex, 'Y'));
-    }
-
-    // Step 6: Tilt X - label as Tilt-X
-    if (this.walkthroughStep === 'step6-tilt-x' && this.tiltXBytes.length === 0) {
+    // Step 5: Tilt X - label as Tilt-X
+    if (this.walkthroughStep === 'step5-tilt-x' && this.tiltXBytes.length === 0) {
       if (bestGuessBytes.length > 0) labels.set(bestGuessBytes[0].byteIndex, 'Tilt-X');
     }
 
-    // Step 7: Tilt Y - label as Tilt-Y
-    if (this.walkthroughStep === 'step7-tilt-y' && this.tiltYBytes.length === 0) {
+    // Step 6: Tilt Y - label as Tilt-Y
+    if (this.walkthroughStep === 'step6-tilt-y' && this.tiltYBytes.length === 0) {
       if (bestGuessBytes.length > 0) labels.set(bestGuessBytes[0].byteIndex, 'Tilt-Y');
     }
 
@@ -1532,6 +1599,18 @@ export class HidDataReader extends LitElement {
   private _resetCapture() {
     // Clear captured packets and restart capture
     this.capturedPackets = [];
+
+    // Clear active device indices so the display updates when switching devices
+    this.activeDeviceIndices.clear();
+
+    // Clear the current active device so it gets set by the next device that sends data
+    this.currentActiveDeviceIndex = undefined;
+
+    // Reset button states if in tablet buttons step
+    if (this.walkthroughStep === 'step10-tablet-buttons') {
+      this.detectedButtonStates = new Set();
+    }
+
     this.requestUpdate();
   }
 
@@ -1558,33 +1637,8 @@ export class HidDataReader extends LitElement {
   }
 
   private _getConfigMetadata(): string {
-    if (!this.deviceConfig) return '';
-
-    let output = '';
-
-    // Add device detection info as comments if real device
-    if (this.isRealDevice && this.activeDeviceIndices.size > 0) {
-      output += '// Device Detection Results:\n';
-      output += `// Stylus data detected from Device Interface(s): ${Array.from(this.activeDeviceIndices).join(', ')}\n`;
-
-      Array.from(this.activeDeviceIndices).forEach(index => {
-        const device = this.realDevices[index];
-        if (device && device.collections[0]) {
-          const collection = device.collections[0];
-          output += `// Device ${index}: Usage Page ${collection.usagePage}, Usage ${collection.usage}`;
-          if (collection.usagePage === 13 && collection.usage === 2) {
-            output += ' (Digitizer - Pen)';
-          }
-          output += '\n';
-        }
-      });
-
-      output += '//\n';
-      output += '// Note: Use the detected device interface when reading HID data\n';
-      output += '//\n';
-    }
-
-    return output;
+    // No metadata/comments - JSON doesn't support comments
+    return '';
   }
 
   private _renderConfigPanel() {
@@ -1618,8 +1672,6 @@ export class HidDataReader extends LitElement {
     // Move to complete step
     this.walkthroughStep = 'complete';
     this.isConfigPanelExpanded = true;
-
-    console.log('[HIDDataReader] Generated complete configuration:', this.completeConfig);
   }
 
   private _handleMetadataCancel() {

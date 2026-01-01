@@ -55,7 +55,7 @@ describe('HIDReader', () => {
         mappings: {
           x: {
             type: 'range',
-            byteIndex: 1,
+            byteIndex: 1, // 0-based: byte 1 (array index 1)
             min: 0,
             max: 255,
           },
@@ -78,19 +78,19 @@ describe('HIDReader', () => {
         mappings: {
           x: {
             type: 'range',
-            byteIndex: 1,
+            byteIndex: 1, // 0-based: byte 1 (array index 1)
             min: 0,
             max: 255,
           },
           y: {
             type: 'range',
-            byteIndex: 2,
+            byteIndex: 2, // 0-based: byte 2 (array index 2)
             min: 0,
             max: 255,
           },
           pressure: {
             type: 'range',
-            byteIndex: 3,
+            byteIndex: 3, // 0-based: byte 3 (array index 3)
             min: 0,
             max: 255,
           },
@@ -115,7 +115,7 @@ describe('HIDReader', () => {
         mappings: {
           value: {
             type: 'range',
-            byteIndex: 1,
+            byteIndex: 1, // 0-based: byte 1 (array index 1)
             min: 0,
             max: 255,
           },
@@ -143,7 +143,7 @@ describe('HIDReader', () => {
         mappings: {
           x: {
             type: MappingType.MULTI_BYTE_RANGE,
-            byteIndex: [1, 2],
+            byteIndex: [1, 2], // 0-based: bytes 1-2 (array indices 1-2)
             min: 0,
             max: 65535, // 2^16 - 1
           },
@@ -165,7 +165,7 @@ describe('HIDReader', () => {
         mappings: {
           value: {
             type: MappingType.MULTI_BYTE_RANGE,
-            byteIndex: [1, 2, 3],
+            byteIndex: [1, 2, 3], // 0-based: bytes 1-3 (array indices 1-3)
             min: 0,
             max: 16777215, // 2^24 - 1
           },
@@ -188,7 +188,7 @@ describe('HIDReader', () => {
         mappings: {
           tiltX: {
             type: MappingType.BIPOLAR_RANGE,
-            byteIndex: 1,
+            byteIndex: 1, // 0-based: byte 1 (array index 1)
             positiveMin: 128,
             positiveMax: 255,
             negativeMin: 0,
@@ -213,7 +213,7 @@ describe('HIDReader', () => {
         mappings: {
           tiltX: {
             type: MappingType.BIPOLAR_RANGE,
-            byteIndex: 1,
+            byteIndex: 1, // 0-based: byte 1 (array index 1)
             positiveMin: 128,
             positiveMax: 255,
             negativeMin: 0,
@@ -239,14 +239,14 @@ describe('HIDReader', () => {
         mappings: {
           status: {
             type: MappingType.CODE,
-            byteIndex: 1,
+            byteIndex: 1, // 0-based: byte 1 (array index 1)
             values: {
               '2': { state: 'buttons' },
             },
           },
           tabletButtons: {
             type: MappingType.BIT_FLAGS,
-            byteIndex: 2,
+            byteIndex: 2, // 0-based: byte 2 (array index 2)
             buttonCount: 8,
           },
         },
@@ -269,14 +269,14 @@ describe('HIDReader', () => {
         mappings: {
           status: {
             type: MappingType.CODE,
-            byteIndex: 1,
+            byteIndex: 1, // 0-based: byte 1 (array index 1)
             values: {
               '2': { state: 'buttons' },
             },
           },
           tabletButtons: {
             type: MappingType.BIT_FLAGS,
-            byteIndex: 2,
+            byteIndex: 2, // 0-based: byte 2 (array index 2)
             buttonCount: 8,
           },
         },
@@ -297,14 +297,14 @@ describe('HIDReader', () => {
         mappings: {
           status: {
             type: MappingType.CODE,
-            byteIndex: 1,
+            byteIndex: 1, // 0-based: byte 1 (array index 1)
             values: {
               '2': { state: 'buttons' },
             },
           },
           tabletButtons: {
             type: MappingType.BIT_FLAGS,
-            byteIndex: 2,
+            byteIndex: 2, // 0-based: byte 2 (array index 2)
             buttonCount: 8,
           },
         },
@@ -327,7 +327,7 @@ describe('HIDReader', () => {
         mappings: {
           status: {
             type: MappingType.CODE,
-            byteIndex: 1,
+            byteIndex: 1, // 0-based: byte 1 (array index 1)
             values: {
               '160': { state: 'stylus' },
               '2': { state: 'buttons' },
@@ -350,7 +350,7 @@ describe('HIDReader', () => {
         mappings: {
           status: {
             type: MappingType.CODE,
-            byteIndex: 1,
+            byteIndex: 1, // 0-based: byte 1 (array index 1)
             values: {
               '10': { state: 'known' },
             },
@@ -388,7 +388,7 @@ describe('HIDReader', () => {
         mappings: {
           x: {
             type: 'range',
-            byteIndex: 10, // Out of bounds
+            byteIndex: 10, // 0-based: byte 10 (out of bounds for 2-byte array)
             min: 0,
             max: 255,
           },
@@ -410,7 +410,7 @@ describe('HIDReader', () => {
         mappings: {
           x: {
             type: 'range',
-            byteIndex: 1,
+            byteIndex: 1, // 0-based: byte 1 (array index 1)
             min: 0,
             max: 255,
           },
@@ -516,32 +516,32 @@ describe('HIDReader', () => {
         mappings: {
           status: {
             type: MappingType.CODE,
-            byteIndex: 1,
+            byteIndex: 1, // 0-based: byte 1 (array index 1)
             values: {
               '160': { state: 'stylus' },
             },
           },
           x: {
             type: MappingType.MULTI_BYTE_RANGE,
-            byteIndex: [2, 3],
+            byteIndex: [2, 3], // 0-based: bytes 2-3 (array indices 2-3)
             min: 0,
             max: 65535,
           },
           y: {
             type: MappingType.MULTI_BYTE_RANGE,
-            byteIndex: [4, 5],
+            byteIndex: [4, 5], // 0-based: bytes 4-5 (array indices 4-5)
             min: 0,
             max: 65535,
           },
           pressure: {
             type: 'range',
-            byteIndex: 6,
+            byteIndex: 6, // 0-based: byte 6 (array index 6)
             min: 0,
             max: 255,
           },
           tiltX: {
             type: MappingType.BIPOLAR_RANGE,
-            byteIndex: 7,
+            byteIndex: 7, // 0-based: byte 7 (array index 7)
             positiveMin: 128,
             positiveMax: 255,
             negativeMin: 0,
@@ -555,13 +555,13 @@ describe('HIDReader', () => {
       const data = new Uint8Array([2, 160, 100, 50, 200, 150, 200, 180]);
 
       const result = reader.processDeviceData(data);
-      
+
       expect(result.state).toBe('stylus');
       expect(result.x).toBeDefined();
       expect(result.y).toBeDefined();
       expect(result.pressure).toBeDefined();
       expect(result.tiltX).toBeDefined();
-      
+
       expect(typeof result.x).toBe('number');
       expect(typeof result.y).toBe('number');
       expect(typeof result.pressure).toBe('number');
@@ -573,7 +573,7 @@ describe('HIDReader', () => {
         mappings: {
           status: {
             type: MappingType.CODE,
-            byteIndex: 1,
+            byteIndex: 1, // 0-based: byte 1 (array index 1)
             values: {
               '160': { state: 'stylus' },
               '2': { state: 'buttons' },
@@ -581,7 +581,7 @@ describe('HIDReader', () => {
           },
           x: {
             type: 'range',
-            byteIndex: 2,
+            byteIndex: 2, // 0-based: byte 2 (array index 2)
             min: 0,
             max: 255,
           },

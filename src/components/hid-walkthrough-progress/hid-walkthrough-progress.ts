@@ -10,7 +10,7 @@ export class HidWalkthroughProgress extends LitElement {
   currentStep = 0;
 
   @property({ type: Number })
-  totalSteps = 9;
+  totalSteps = 10;
 
   render() {
     return html`

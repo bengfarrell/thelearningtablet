@@ -14,6 +14,14 @@ export interface ByteData {
   label?: string;
 }
 
+export interface DeviceInfo {
+  deviceNumber?: number;
+  packetCount?: number;
+  usagePage?: number;
+  usage?: number;
+  isMock?: boolean;
+}
+
 /**
  * Component that displays a grid of byte cells
  */
@@ -30,11 +38,49 @@ export class BytesDisplay extends LitElement {
   @property({ type: Number })
   placeholderCount = 9;
 
+  @property({ type: Object })
+  deviceInfo?: DeviceInfo;
+
   render() {
+    const deviceInfoHtml = this.deviceInfo ? html`
+      <div class="device-info-header">
+        ${this.deviceInfo.deviceNumber !== undefined ? html`
+          <span class="info-item">
+            <span class="info-label">Device:</span>
+            <span class="info-value">${this.deviceInfo.isMock ? 'Simulated' : this.deviceInfo.deviceNumber}</span>
+          </span>
+        ` : ''}
+        ${this.deviceInfo.packetCount !== undefined ? html`
+          <span class="info-item">
+            <span class="info-label">Packets:</span>
+            <span class="info-value">${this.deviceInfo.packetCount}</span>
+          </span>
+        ` : ''}
+        ${this.deviceInfo.usagePage !== undefined ? html`
+          <span class="info-item">
+            <span class="info-label">Usage Page:</span>
+            <span class="info-value">${this.deviceInfo.usagePage}</span>
+          </span>
+        ` : ''}
+        ${this.deviceInfo.usage !== undefined ? html`
+          <span class="info-item">
+            <span class="info-label">Usage:</span>
+            <span class="info-value">${this.deviceInfo.usage}</span>
+          </span>
+        ` : ''}
+        ${this.deviceInfo.usagePage === 13 && this.deviceInfo.usage === 2 ? html`
+          <span class="info-badge digitizer ${this.deviceInfo.isMock ? 'mock' : ''}">
+            ${this.deviceInfo.isMock ? 'Simulated Pen' : 'Digitizer - Pen'}
+          </span>
+        ` : ''}
+      </div>
+    ` : '';
+
     if (this.isEmpty) {
       // Show empty placeholder cells
       return html`
         <div class="bytes-container">
+          ${deviceInfoHtml}
           <div class="bytes-grid">
             ${Array.from({ length: this.placeholderCount }).map((_, index) => html`
               <byte-display-block
@@ -49,6 +95,7 @@ export class BytesDisplay extends LitElement {
 
     return html`
       <div class="bytes-container">
+        ${deviceInfoHtml}
         <div class="bytes-grid">
           ${this.bytes.map(byte => html`
             <byte-display-block

@@ -473,18 +473,49 @@ export class TabletDataGenerator {
   /**
    * Generate button press packet
    * Note: WebHID strips the Report ID, so we don't include it
+   * Uses a compact structure with button bit-flags at byte 1
    */
   generateButtonPacket(buttonNumber: number): Uint8Array {
-    const packet = new Uint8Array(7);
-    packet[0] = 0x02; // Button mode status
-    packet[1] = 0;
+    const packet = new Uint8Array(11);
+    packet[0] = 0xf0; // Button mode status (different from stylus 0xa0)
+    packet[1] = 1 << (buttonNumber - 1); // Set button bit in byte 1
     packet[2] = 0;
     packet[3] = 0;
     packet[4] = 0;
     packet[5] = 0;
-    packet[6] = 1 << (buttonNumber - 1); // Set button bit
+    packet[6] = 0;
+    packet[7] = 0;
+    packet[8] = 0;
+    packet[9] = 0;
+    packet[10] = 0;
 
     return packet;
+  }
+
+  /**
+   * Generate a sequence of tablet button presses
+   * Simulates pressing each button on the tablet (express keys)
+   * This helps detect which byte contains button bit-flags
+   */
+  *generateTabletButtonSequence(
+    buttonCount: number = 8,
+    duration: number = 2000
+  ): Generator<Uint8Array> {
+    const samplesPerButton = Math.floor((duration / 1000) * this.config.sampleRate / buttonCount);
+
+    // Press each button individually
+    for (let buttonNum = 1; buttonNum <= buttonCount; buttonNum++) {
+      for (let i = 0; i < samplesPerButton; i++) {
+        yield this.generateButtonPacket(buttonNum);
+      }
+    }
+
+    // Add some packets with no buttons pressed at the end
+    const noButtonPacket = new Uint8Array(11);
+    noButtonPacket[0] = 0xf0; // Button mode status
+    for (let i = 0; i < 10; i++) {
+      yield noButtonPacket;
+    }
   }
 }
 

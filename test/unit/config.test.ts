@@ -34,24 +34,24 @@ describe('Config Utilities', () => {
     },
     byteCodeMappings: {
       status: {
-        byteIndex: [1],
+        byteIndex: [0],
         type: MappingType.CODE,
         values: {
           '160': { state: 'stylus' },
         },
       },
       x: {
-        byteIndex: [2, 3],
+        byteIndex: [1, 2],
         max: 65535,
         type: MappingType.MULTI_BYTE_RANGE,
       },
       y: {
-        byteIndex: [4, 5],
+        byteIndex: [3, 4],
         max: 65535,
         type: MappingType.MULTI_BYTE_RANGE,
       },
       pressure: {
-        byteIndex: [6, 7],
+        byteIndex: [5, 6],
         max: 8191,
         type: MappingType.MULTI_BYTE_RANGE,
       },

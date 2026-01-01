@@ -71,12 +71,14 @@ export const styles = css`
   }
 
   .button.disconnect {
-    background: #f44336;
+    background: #f44336 !important;
+    color: white;
     padding: 8px 16px;
+    border: none;
   }
 
   .button.disconnect:hover:not(:disabled) {
-    background: #d32f2f;
+    background: #d32f2f !important;
   }
 
   .content {
@@ -95,6 +97,24 @@ export const styles = css`
     margin: 0 0 15px 0;
     color: #667eea;
     font-size: 18px;
+  }
+
+  .section-header-with-actions {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 15px;
+    gap: 20px;
+  }
+
+  .section-header-with-actions h3 {
+    margin: 0;
+  }
+
+  .header-actions {
+    display: flex;
+    align-items: center;
+    gap: 12px;
   }
 
   .gesture-buttons {
@@ -338,6 +358,11 @@ export const styles = css`
     text-transform: uppercase;
   }
 
+  .chip-badge.mock-badge {
+    background: #ff9800;
+    color: white;
+  }
+
   .chip-count {
     padding: 2px 6px;
     background: #667eea;
@@ -345,6 +370,50 @@ export const styles = css`
     border-radius: 10px;
     font-size: 10px;
     font-weight: 700;
+  }
+
+  /* Device Details */
+  .device-details {
+    margin-top: 15px;
+    padding-top: 15px;
+    border-top: 1px solid #e0e0e0;
+  }
+
+  .device-detail-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 8px 0;
+    font-size: 13px;
+  }
+
+  .detail-label {
+    font-weight: 600;
+    color: #333;
+    min-width: 80px;
+  }
+
+  .detail-value {
+    color: #666;
+    padding: 2px 8px;
+    background: rgba(102, 126, 234, 0.1);
+    border-radius: 4px;
+    font-size: 12px;
+  }
+
+  .detail-badge {
+    padding: 3px 8px;
+    background: #4caf50;
+    color: white;
+    border-radius: 10px;
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+  }
+
+  .detail-badge.mock-badge {
+    background: #ff9800;
+    color: white;
   }
 
   /* Active Streams Section */
@@ -900,7 +969,12 @@ export const styles = css`
     cursor: not-allowed;
   }
 
-
+  .button-group {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+    margin-top: 8px;
+  }
 
   /* Byte analysis styles */
   .byte-analysis {

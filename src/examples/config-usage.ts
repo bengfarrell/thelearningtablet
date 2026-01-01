@@ -86,7 +86,7 @@ export function createCustomConfig(): Config {
     },
     byteCodeMappings: {
       status: {
-        byteIndex: [1],
+        byteIndex: [0],
         type: MappingType.CODE,
         values: {
           '192': { state: 'stylus', primaryButtonPressed: true },
@@ -94,29 +94,29 @@ export function createCustomConfig(): Config {
         },
       },
       x: {
-        byteIndex: [2, 3],
+        byteIndex: [1, 2],
         max: 50800,
         type: MappingType.MULTI_BYTE_RANGE,
       },
       y: {
-        byteIndex: [4, 5],
+        byteIndex: [3, 4],
         max: 31750,
         type: MappingType.MULTI_BYTE_RANGE,
       },
       pressure: {
-        byteIndex: [6, 7],
+        byteIndex: [5, 6],
         max: 8191,
         type: MappingType.MULTI_BYTE_RANGE,
       },
       tiltX: {
-        byteIndex: [8],
+        byteIndex: [7],
         positiveMax: 60,
         negativeMin: 192,
         negativeMax: 196,
         type: MappingType.BIPOLAR_RANGE,
       },
       tiltY: {
-        byteIndex: [9],
+        byteIndex: [8],
         positiveMax: 60,
         negativeMin: 192,
         negativeMax: 196,
@@ -125,7 +125,7 @@ export function createCustomConfig(): Config {
       tabletButtons: {
         type: MappingType.BIT_FLAGS,
         buttonCount: 6,
-        byteIndex: [10],
+        byteIndex: [9],
       },
     },
   };

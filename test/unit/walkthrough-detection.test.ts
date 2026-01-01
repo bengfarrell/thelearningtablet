@@ -83,44 +83,51 @@ describe('Walkthrough Byte Detection', () => {
     });
   });
 
-  describe('Step 4: Hover Horizontal (X Coordinate Confirmation)', () => {
-    it('should detect X coordinate at bytes 2-3 (indices 1-2) without pressure', () => {
-      // Generate horizontal hover (no pressure)
-      const packets = collectPackets(
-        generator.generateHoverLine(0, 0.5, 1, 0.5, 1500)
+  describe('Step 4: Hover Movement (X and Y Coordinate Confirmation)', () => {
+    it('should detect both X and Y coordinates from freeform hover movement', () => {
+      // Generate hover movement with both horizontal and vertical components
+      // Combine horizontal and vertical hover to simulate freeform movement
+      const horizontalPackets = collectPackets(
+        generator.generateHoverLine(0, 0.5, 1, 0.5, 1500),
+        150
       );
+      const verticalPackets = collectPackets(
+        generator.generateHoverLine(0.5, 0, 0.5, 1, 1500),
+        150
+      );
+      const packets = [...horizontalPackets, ...verticalPackets];
 
       // Analyze bytes
       const analysis = analyzeBytes(packets);
-      const detectedBytes = getBestGuessBytesByVariance(analysis, 2);
+      const filteredAnalysis = analysis.filter(b => b.byteIndex !== 0); // Exclude status byte
 
-      // Verify X coordinate bytes (0-based indices 1, 2)
-      expect(detectedBytes.map(b => b.byteIndex)).toEqual([1, 2]);
+      // Get top 4 bytes (2 pairs for X and Y) - this simulates what the UI does
+      let coordinateBytes = getBestGuessBytesByVariance(filteredAnalysis, 4);
+
+      // If we only got 2 bytes (first pair), that's expected behavior from getBestGuessBytesByVariance
+      // In the actual walkthrough, we'd get X from the first call, then filter and get Y
+      // Let's simulate that process:
+      if (coordinateBytes.length === 2) {
+        // First pair is X coordinates
+        const xBytes = coordinateBytes;
+        expect(xBytes.map(b => b.byteIndex)).toEqual([1, 2]);
+
+        // Now filter out X bytes and get Y
+        const knownByteIndices = new Set(xBytes.map(b => b.byteIndex));
+        const filteredForY = filteredAnalysis.filter(b => !knownByteIndices.has(b.byteIndex));
+        const yBytes = getBestGuessBytesByVariance(filteredForY, 2);
+
+        // Verify Y coordinate bytes (0-based indices 3, 4)
+        expect(yBytes.map(b => b.byteIndex)).toEqual([3, 4]);
+      } else {
+        // If we got 4 bytes, verify them all
+        coordinateBytes.sort((a, b) => a.byteIndex - b.byteIndex);
+        expect(coordinateBytes.map(b => b.byteIndex)).toEqual([1, 2, 3, 4]);
+      }
     });
   });
 
-  describe('Step 5: Hover Vertical (Y Coordinate Confirmation)', () => {
-    it('should detect Y coordinate at bytes 4-5 (indices 3-4) without pressure', () => {
-      // Generate vertical hover (no pressure)
-      const packets = collectPackets(
-        generator.generateHoverLine(0.5, 0, 0.5, 1, 1500)
-      );
-
-      // Analyze bytes
-      const analysis = analyzeBytes(packets);
-
-      // Filter out X coordinate bytes (indices 1, 2)
-      const knownByteIndices = new Set([1, 2]);
-      const filteredAnalysis = analysis.filter(b => !knownByteIndices.has(b.byteIndex));
-
-      const detectedBytes = getBestGuessBytesByVariance(filteredAnalysis, 2);
-
-      // Verify Y coordinate bytes (0-based indices 3, 4)
-      expect(detectedBytes.map(b => b.byteIndex)).toEqual([3, 4]);
-    });
-  });
-
-  describe('Step 6: Tilt X Detection', () => {
+  describe('Step 5: Tilt X Detection', () => {
     it('should detect tilt X at byte 8 (index 7)', () => {
       // Generate tilt X variation
       const packets = collectPackets(
@@ -141,7 +148,7 @@ describe('Walkthrough Byte Detection', () => {
     });
   });
 
-  describe('Step 7: Tilt Y Detection', () => {
+  describe('Step 6: Tilt Y Detection', () => {
     it('should detect tilt Y at byte 9 (index 8)', () => {
       // Generate tilt Y variation
       const packets = collectPackets(
@@ -162,7 +169,7 @@ describe('Walkthrough Byte Detection', () => {
     });
   });
 
-  describe('Step 8 & 9: Button Detection', () => {
+  describe('Step 7 & 8: Button Detection', () => {
     it('should detect status byte changes for button presses', () => {
       // Generate normal contact packets
       const normalPackets = collectPackets(
@@ -318,12 +325,12 @@ describe('Walkthrough Byte Detection', () => {
         allPackets
       );
 
-      // Verify configuration matches expected structure (1-based indexing in JSON)
-      expect(generatedConfig.x.byteIndex).toEqual([2, 3]);
-      expect(generatedConfig.y.byteIndex).toEqual([4, 5]);
-      expect(generatedConfig.pressure.byteIndex).toEqual([6, 7]);
-      expect(generatedConfig.tiltX.byteIndex).toEqual([8]);
-      expect(generatedConfig.tiltY.byteIndex).toEqual([9]);
+      // Verify configuration matches expected structure (0-based indexing)
+      expect(generatedConfig.x.byteIndex).toEqual([1, 2]);
+      expect(generatedConfig.y.byteIndex).toEqual([3, 4]);
+      expect(generatedConfig.pressure.byteIndex).toEqual([5, 6]);
+      expect(generatedConfig.tiltX.byteIndex).toEqual([7]);
+      expect(generatedConfig.tiltY.byteIndex).toEqual([8]);
 
       // Verify types
       expect(generatedConfig.x.type).toBe('multi-byte-range');
@@ -334,7 +341,7 @@ describe('Walkthrough Byte Detection', () => {
 
       // Verify status block
       expect(generatedConfig.status).toBeDefined();
-      expect(generatedConfig.status!.byteIndex).toEqual([1]);
+      expect(generatedConfig.status!.byteIndex).toEqual([0]);
       expect(generatedConfig.status!.type).toBe('code');
       expect(generatedConfig.status!.values).toBeDefined();
 
