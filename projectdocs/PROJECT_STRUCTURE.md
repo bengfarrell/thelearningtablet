@@ -15,23 +15,32 @@ thelearningtablet/
 │
 ├── src/                             # 💻 Source code
 │   ├── components/                  # Web components
-│   │   ├── tablet-app/
-│   │   │   ├── tablet-app.ts
-│   │   │   └── tablet-app.styles.ts
-│   │   ├── tablet-status/
-│   │   │   ├── tablet-status.ts
-│   │   │   └── tablet-status.styles.ts
-│   │   └── drawing-canvas/
-│   │       ├── drawing-canvas.ts
-│   │       └── drawing-canvas.styles.ts
+│   │   ├── hid-data-reader/
+│   │   │   ├── hid-data-reader.ts
+│   │   │   └── hid-data-reader.styles.ts
+│   │   ├── bytes-display/
+│   │   │   ├── bytes-display.ts
+│   │   │   └── bytes-display.styles.ts
+│   │   ├── drawing-canvas/
+│   │   │   ├── drawing-canvas.ts
+│   │   │   └── drawing-canvas.styles.ts
+│   │   └── ...                      # Other UI components
 │   │
-│   ├── types/                       # TypeScript type definitions
-│   │   └── webhid.d.ts
+│   ├── utils/                       # Utility modules
+│   │   ├── data-helpers.ts          # Data parsing utilities
+│   │   ├── event-emitter.ts         # Event system
+│   │   ├── finddevice.ts            # Device discovery
+│   │   ├── hid-reader.ts            # HID data reader
+│   │   └── byte-detector.ts         # Byte analysis
 │   │
-│   ├── data-helpers.ts              # Data parsing utilities
-│   ├── event-emitter.ts             # Event system
-│   ├── finddevice.ts                # Device discovery
-│   ├── hid-reader.ts                # HID data reader
+│   ├── models/                      # Data models
+│   │   └── config.ts                # Tablet configuration
+│   │
+│   ├── mockbytes/                   # Mock tablet simulation
+│   │   ├── mock-tablet-device.ts
+│   │   ├── tablet-data-generator.ts
+│   │   └── presets.ts
+│   │
 │   └── index.ts                     # Public API exports
 │
 ├── test/                            # 🧪 Test suites
@@ -78,8 +87,9 @@ thelearningtablet/
 
 **Organization**:
 - **`/components`** - LitElement web components, each in its own folder with separated styles
-- **`/types`** - TypeScript type definitions (like WebHID API types)
-- **Root level** - Core services and utilities (device finder, HID reader, etc.)
+- **`/utils`** - Core services and utilities (device finder, HID reader, etc.)
+- **`/models`** - TypeScript data models and configurations
+- **`/mockbytes`** - Mock tablet device simulation for testing
 
 **Why this structure?**: Separates UI components from business logic, making the codebase easier to maintain.
 
@@ -217,8 +227,8 @@ npm run dev
 
 ## 🔍 Finding Things
 
-### "Where is the component logic?"
-→ `src/components/component-name/component-name.ts`
+### "Where is the main component?"
+→ `src/components/hid-data-reader/hid-data-reader.ts`
 
 ### "Where are the component styles?"
 → `src/components/component-name/component-name.styles.ts`
@@ -232,8 +242,8 @@ npm run dev
 ### "Where is the build output?"
 → `dist/` folder (generated, gitignored)
 
-### "Where are the type definitions?"
-→ `src/types/` for custom types
+### "Where are the utility modules?"
+→ `src/utils/` folder
 
 ## 🚀 Quick Commands
 
@@ -276,5 +286,4 @@ npm run format           # Format code
 
 ---
 
-**Last Updated**: November 2025
-
+**Last Updated**: January 2026

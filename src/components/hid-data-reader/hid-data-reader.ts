@@ -19,14 +19,13 @@ import {
   type DeviceMetadata,
   type UserProvidedMetadata,
 } from '../../utils/metadata-generator.js';
-import '../bytes-display/bytes-display.js';
-import type { ByteData } from '../bytes-display/bytes-display.js';
+import '../hid-devices/hid-devices.js';
+import type { DeviceStream, DeviceDetails } from '../device-list-minimal/device-list-minimal.js';
+import type { ByteData, DeviceInfo } from '../bytes-display/bytes-display.js';
 import '../hid-json-config/hid-json-config.js';
-import '../hid-walkthrough-progress/hid-walkthrough-progress.js';
-import '../device-metadata-form/device-metadata-form.js';
+import '../hid-walkthrough/hid-walkthrough.js';
+import type { WalkthroughStep } from '../hid-walkthrough/hid-walkthrough.js';
 import type { MetadataFormData } from '../device-metadata-form/device-metadata-form.js';
-
-type WalkthroughStep = 'idle' | 'step1-horizontal' | 'step2-vertical' | 'step3-pressure' | 'step4-hover-movement' | 'step5-tilt-x' | 'step6-tilt-y' | 'step7-primary-button' | 'step8-secondary-button' | 'step9-tablet-buttons' | 'step10-metadata' | 'complete';
 
 /**
  * HID Data Reader component for visualizing raw HID bytes
@@ -176,91 +175,139 @@ export class HidDataReader extends LitElement {
   }
 
   private _renderDeviceStreams() {
-    const streams = Array.from(this.deviceDataStreams.entries());
-    const activeStreams = streams.filter(([_, stream]) => stream.packetCount > 0);
-    const hasActiveStreams = activeStreams.length > 0;
+    // Transform deviceDataStreams to the format expected by hid-devices
+    const streams: DeviceStream[] = Array.from(this.deviceDataStreams.entries()).map(([index, data]) => ({
+      index,
+      lastPacket: data.lastPacket,
+      packetCount: data.packetCount,
+      lastUpdate: data.lastUpdate
+    }));
+
+    // Build device details map
+    const deviceDetails = new Map<number, DeviceDetails>();
+    streams.forEach(stream => {
+      if (stream.index === -1) {
+        // Mock device
+        deviceDetails.set(-1, { usagePage: 13, usage: 2 });
+      } else {
+        const device = this.realDevices[stream.index];
+        if (device) {
+          const collection = device.collections[0];
+          deviceDetails.set(stream.index, {
+            usagePage: collection?.usagePage,
+            usage: collection?.usage,
+            opened: device.opened
+          });
+        }
+      }
+    });
+
+    // Get bytes data for display
+    const { bytesData, deviceInfo, isEmpty } = this._getBytesDisplayData();
 
     return html`
       <div class="section">
-        <div class="section-header-with-actions">
-          <h3>Device Interfaces</h3>
-          <div class="header-actions">
-            ${this.isRealDevice ? html`
-              <div class="status-badge connected">
-                <span class="status-icon">✓</span>
-                <span>Connected: ${this.realDeviceName}</span>
-                ${this.realDevice?.opened
-                  ? html`<span class="status-detail">• Opened</span>`
-                  : html`<span class="status-detail warning">• Not Opened</span>`}
-              </div>
-              <button class="button small disconnect" @click="${this._disconnectRealDevice}">
-                Disconnect
-              </button>
-            ` : ''}
-          </div>
-        </div>
-
-        <!-- Minimal device list -->
-        <div class="device-list-minimal">
-          <div class="device-list-header">
-            <span class="device-count">${streams.length} interface${streams.length !== 1 ? 's' : ''} detected</span>
-          </div>
-          <div class="device-chips">
-            ${streams.map(([index, stream]) => {
-              const isActive = stream.packetCount > 0;
-              const isMock = index === -1;
-              const device = isMock ? null : this.realDevices[index];
-              const collection = device?.collections[0];
-              const isDigitizer = collection?.usagePage === 13 && collection?.usage === 2;
-              const deviceLabel = isMock ? 'Simulated' : `Device ${index}`;
-
-              return html`
-                <div class="device-chip ${isActive ? 'active' : 'inactive'} ${isMock ? 'mock' : ''}">
-                  <span class="chip-icon">${isActive ? '✅' : '⚪'}</span>
-                  <span class="chip-label">${deviceLabel}</span>
-                  ${isDigitizer ? html`<span class="chip-badge">Pen</span>` : ''}
-                  ${isMock ? html`<span class="chip-badge mock-badge">Mock</span>` : ''}
-                  ${isActive ? html`<span class="chip-count">${stream.packetCount}</span>` : ''}
-                </div>
-              `;
-            })}
-          </div>
-
-          <!-- Device details -->
-          <div class="device-details">
-            ${streams.map(([index, stream]) => {
-              const isMock = index === -1;
-              const device = isMock ? null : this.realDevices[index];
-              const collection = device?.collections[0];
-              const isDigitizer = collection?.usagePage === 13 && collection?.usage === 2;
-              const deviceLabel = isMock ? 'Simulated' : `Device ${index}`;
-
-              return html`
-                <div class="device-detail-row">
-                  <span class="detail-label">${deviceLabel}:</span>
-                  ${isMock ? html`
-                    <span class="detail-value">Mock Data Generator</span>
-                    <span class="detail-value">Usage Page: 13</span>
-                    <span class="detail-value">Usage: 2</span>
-                    <span class="detail-value">Packets: ${stream.packetCount}</span>
-                    <span class="detail-badge mock-badge">Simulated Pen</span>
-                  ` : html`
-                    <span class="detail-value">Usage Page: ${collection?.usagePage ?? 'N/A'}</span>
-                    <span class="detail-value">Usage: ${collection?.usage ?? 'N/A'}</span>
-                    <span class="detail-value">Packets: ${stream.packetCount}</span>
-                    ${isDigitizer ? html`<span class="detail-badge">Digitizer - Pen</span>` : ''}
-                  `}
-                </div>
-              `;
-            })}
-          </div>
-        </div>
-
-        <!-- Raw byte data display -->
-        ${this._renderLiveAnalysis()}
-
+        <h3>Device Interfaces</h3>
+        <hid-devices
+          .streams=${streams}
+          .deviceDetails=${deviceDetails}
+          .bytes=${bytesData}
+          .bytesEmpty=${isEmpty}
+          .bytesPlaceholderCount=${9}
+          .bytesDeviceInfo=${deviceInfo}
+          .isConnected=${this.isRealDevice}
+          .connectedDeviceName=${this.realDeviceName}
+          .isDeviceOpened=${this.realDevice?.opened || false}
+          @disconnect=${this._disconnectRealDevice}>
+        </hid-devices>
       </div>
     `;
+  }
+
+  private _getBytesDisplayData(): { bytesData: ByteData[], deviceInfo: DeviceInfo | undefined, isEmpty: boolean } {
+    // Use current packets if available, otherwise use last captured packets
+    const packetsToShow = this.capturedPackets.length > 0
+      ? this.capturedPackets
+      : this.lastCapturedPackets;
+
+    // Get device info for the active device
+    const activeDeviceIndex = this.currentActiveDeviceIndex;
+    const deviceStream = activeDeviceIndex !== undefined ? this.deviceDataStreams.get(activeDeviceIndex) : undefined;
+
+    // Handle mock device (index -1) vs real devices
+    const isMockDevice = activeDeviceIndex === -1;
+    const device = isMockDevice ? null : (activeDeviceIndex !== undefined ? this.realDevices[activeDeviceIndex] : undefined);
+    const collection = device?.collections[0];
+
+    const deviceInfo: DeviceInfo | undefined = activeDeviceIndex !== undefined ? {
+      deviceNumber: activeDeviceIndex,
+      packetCount: deviceStream?.packetCount || 0,
+      usagePage: isMockDevice ? 13 : collection?.usagePage,
+      usage: isMockDevice ? 2 : collection?.usage,
+      isMock: isMockDevice
+    } : undefined;
+
+    if (packetsToShow.length === 0) {
+      return { bytesData: [], deviceInfo, isEmpty: true };
+    }
+
+    // Get the latest packet
+    const latestPacket = packetsToShow[packetsToShow.length - 1];
+
+    // Analyze captured packets in real-time
+    const analysis = analyzeBytes(packetsToShow);
+
+    // Filter out bytes we've already identified in previous steps
+    const knownByteIndices = new Set([
+      ...this.horizontalBytes.map(b => b.byteIndex),
+      ...this.verticalBytes.map(b => b.byteIndex),
+      ...this.pressureBytes.map(b => b.byteIndex),
+      ...this.hoverHorizontalBytes.map(b => b.byteIndex),
+      ...this.hoverVerticalBytes.map(b => b.byteIndex),
+      ...this.tiltXBytes.map(b => b.byteIndex),
+      ...this.tiltYBytes.map(b => b.byteIndex),
+    ]);
+
+    // Filter out likely status/report bytes
+    const movementAnalysis = analysis.filter(byte => {
+      if (knownByteIndices.has(byte.byteIndex)) return false;
+      if (byte.variance === 0) return false;
+      if (byte.variance < 10) {
+        const uniqueValues = new Set(this.capturedPackets.map(p => p[byte.byteIndex]));
+        if (uniqueValues.size <= 5) return false;
+      }
+      return true;
+    });
+
+    // Get best guess bytes (top 3 by variance)
+    const bestGuessBytes = getBestGuessBytesByVariance(movementAnalysis, 3);
+    const bestGuessIndices = new Set(bestGuessBytes.map(b => b.byteIndex));
+
+    // Create a map of byte index to analysis data
+    const analysisMap = new Map(analysis.map(a => [a.byteIndex, a]));
+
+    // Compute real-time best guess labels for current step
+    const realtimeLabels = this._getRealtimeBestGuessLabels(bestGuessBytes);
+
+    // Build byte data array
+    const bytesData: ByteData[] = Array.from(latestPacket).map((value, byteIndex) => {
+      const isBestGuess = bestGuessIndices.has(byteIndex);
+      const analysisData = analysisMap.get(byteIndex);
+      const byteLabel = this._getByteLabel(byteIndex) || realtimeLabels.get(byteIndex) || undefined;
+
+      return {
+        byteIndex,
+        value,
+        min: analysisData?.min,
+        max: analysisData?.max,
+        variance: analysisData?.variance,
+        isBestGuess,
+        isIdentified: !!byteLabel,
+        label: byteLabel
+      };
+    });
+
+    return { bytesData, deviceInfo, isEmpty: false };
   }
 
 
@@ -304,231 +351,19 @@ export class HidDataReader extends LitElement {
   }
 
   private _renderWalkthrough() {
-    if (this.walkthroughStep === 'step1-horizontal') {
-      const hasData = this.capturedPackets.length > 0;
-      return html`
-        <div class="section walkthrough active">
-          <div class="step-header">
-            <h3>Step 1: Horizontal Movement (Contact)</h3>
-            <button class="icon-button" @click="${this._resetCapture}" title="Reset">🔄</button>
-            <hid-walkthrough-progress currentStep="0" totalSteps="10"></hid-walkthrough-progress>
-            <button class="icon-button" ?disabled="${!hasData}" @click="${() => this._completeManualStep('horizontal')}" title="Next Step">→</button>
-          </div>
-          <div class="step-description">
-            <p>This will help us identify which bytes represent the <strong>X coordinate</strong>.</p>
-            <button class="simulate-button" ?disabled="${this.isPlaying}" @click="${() => this._playGesture('horizontal')}">
-              ${this.isPlaying ? '⏳ Simulating...' : '🤖 Simulate this data'}
-            </button>
-          </div>
-        </div>
-      `;
-    }
-
-    if (this.walkthroughStep === 'step2-vertical') {
-      const hasData = this.capturedPackets.length > 0;
-      return html`
-        <div class="section walkthrough active">
-          <div class="step-header">
-            <h3>Step 2: Vertical Movement (Contact)</h3>
-            <button class="icon-button" @click="${this._resetCapture}" title="Reset">🔄</button>
-            <hid-walkthrough-progress currentStep="1" totalSteps="10"></hid-walkthrough-progress>
-            <button class="icon-button" ?disabled="${!hasData}" @click="${() => this._completeManualStep('vertical')}" title="Next Step">→</button>
-          </div>
-          <div class="step-description">
-            <p>This will help us identify which bytes represent the <strong>Y coordinate</strong>.</p>
-            <button class="simulate-button" ?disabled="${this.isPlaying}" @click="${() => this._playGesture('vertical')}">
-              ${this.isPlaying ? '⏳ Simulating...' : '🤖 Simulate this data'}
-            </button>
-          </div>
-        </div>
-      `;
-    }
-
-    if (this.walkthroughStep === 'step3-pressure') {
-      const hasData = this.capturedPackets.length > 0;
-      return html`
-        <div class="section walkthrough active">
-          <div class="step-header">
-            <h3>Step 3: Pressure Detection</h3>
-            <button class="icon-button" @click="${this._resetCapture}" title="Reset">🔄</button>
-            <hid-walkthrough-progress currentStep="2" totalSteps="10"></hid-walkthrough-progress>
-            <button class="icon-button" ?disabled="${!hasData}" @click="${() => this._completeManualStep('pressure')}" title="Next Step">→</button>
-          </div>
-          <div class="step-description">
-            <p>This will help us identify which bytes represent <strong>pressure</strong>.</p>
-            <button class="simulate-button" ?disabled="${this.isPlaying}" @click="${() => this._playGesture('pressure')}">
-              ${this.isPlaying ? '⏳ Simulating...' : '🤖 Simulate this data'}
-            </button>
-          </div>
-        </div>
-      `;
-    }
-
-    if (this.walkthroughStep === 'step4-hover-movement') {
-      const hasData = this.capturedPackets.length > 0;
-      return html`
-        <div class="section walkthrough active">
-          <div class="step-header">
-            <h3>Step 4: Hover Movement</h3>
-            <button class="icon-button" @click="${this._resetCapture}" title="Reset">🔄</button>
-            <hid-walkthrough-progress currentStep="3" totalSteps="10"></hid-walkthrough-progress>
-            <button class="icon-button" ?disabled="${!hasData}" @click="${() => this._completeManualStep('hover-movement')}" title="Next Step">→</button>
-          </div>
-          <div class="step-description">
-            <p>Hover your pen above the tablet and move it around freely (both horizontally and vertically).</p>
-            <p>This helps identify X and Y coordinate bytes without pressure interference.</p>
-            <div class="button-group">
-              <button class="simulate-button" ?disabled="${this.isPlaying}" @click="${() => this._playGesture('circle')}">
-                ${this.isPlaying ? '⏳ Simulating...' : '🤖 Simulate this data'}
-              </button>
-            </div>
-          </div>
-        </div>
-      `;
-    }
-
-    if (this.walkthroughStep === 'step5-tilt-x') {
-      const hasData = this.capturedPackets.length > 0;
-      return html`
-        <div class="section walkthrough active">
-          <div class="step-header">
-            <h3>Step 5: Tilt X Detection</h3>
-            <button class="icon-button" @click="${this._resetCapture}" title="Reset">🔄</button>
-            <hid-walkthrough-progress currentStep="4" totalSteps="10"></hid-walkthrough-progress>
-            <button class="icon-button" ?disabled="${!hasData}" @click="${() => this._completeManualStep('tilt-x')}" title="Next Step">→</button>
-          </div>
-          <div class="step-description">
-            <p>This will help us identify which byte represents <strong>X tilt</strong>.</p>
-            <button class="simulate-button" ?disabled="${this.isPlaying}" @click="${() => this._playGesture('tilt-x')}">
-              ${this.isPlaying ? '⏳ Simulating...' : '🤖 Simulate this data'}
-            </button>
-          </div>
-        </div>
-      `;
-    }
-
-    if (this.walkthroughStep === 'step6-tilt-y') {
-      const hasData = this.capturedPackets.length > 0;
-      return html`
-        <div class="section walkthrough active">
-          <div class="step-header">
-            <h3>Step 6: Tilt Y Detection</h3>
-            <button class="icon-button" @click="${this._resetCapture}" title="Reset">🔄</button>
-            <hid-walkthrough-progress currentStep="5" totalSteps="10"></hid-walkthrough-progress>
-            <button class="icon-button" ?disabled="${!hasData}" @click="${() => this._completeManualStep('tilt-y')}" title="Next Step">→</button>
-          </div>
-          <div class="step-description">
-            <p>This will help us identify which byte represents <strong>Y tilt</strong>.</p>
-            <button class="simulate-button" ?disabled="${this.isPlaying}" @click="${() => this._playGesture('tilt-y')}">
-              ${this.isPlaying ? '⏳ Simulating...' : '🤖 Simulate this data'}
-            </button>
-          </div>
-        </div>
-      `;
-    }
-
-    if (this.walkthroughStep === 'step7-primary-button') {
-      const hasData = this.capturedPackets.length > 0;
-      return html`
-        <div class="section walkthrough active">
-          <div class="step-header">
-            <h3>Step 7: Primary Button Detection</h3>
-            <button class="icon-button" @click="${this._resetCapture}" title="Reset">🔄</button>
-            <hid-walkthrough-progress currentStep="6" totalSteps="10"></hid-walkthrough-progress>
-            <button class="icon-button" ?disabled="${!hasData}" @click="${() => this._completeManualStep('primary-button')}" title="Next Step">→</button>
-          </div>
-          <div class="step-description">
-            <p>This will help us identify the status byte value for <strong>primary button</strong>.</p>
-            <button class="simulate-button" ?disabled="${this.isPlaying}" @click="${() => this._playGesture('primary-button')}">
-              ${this.isPlaying ? '⏳ Simulating...' : '🤖 Simulate this data'}
-            </button>
-          </div>
-        </div>
-      `;
-    }
-
-    if (this.walkthroughStep === 'step8-secondary-button') {
-      const hasData = this.capturedPackets.length > 0;
-      return html`
-        <div class="section walkthrough active">
-          <div class="step-header">
-            <h3>Step 8: Secondary Button Detection</h3>
-            <button class="icon-button" @click="${this._resetCapture}" title="Reset">🔄</button>
-            <hid-walkthrough-progress currentStep="7" totalSteps="10"></hid-walkthrough-progress>
-            <button class="icon-button" ?disabled="${!hasData}" @click="${() => this._completeManualStep('secondary-button')}" title="Next Step">→</button>
-          </div>
-          <div class="step-description">
-            <p>This will help us identify the status byte value for <strong>secondary button</strong>.</p>
-            <button class="simulate-button" ?disabled="${this.isPlaying}" @click="${() => this._playGesture('secondary-button')}">
-              ${this.isPlaying ? '⏳ Simulating...' : '🤖 Simulate this data'}
-            </button>
-          </div>
-        </div>
-      `;
-    }
-
-    if (this.walkthroughStep === 'step9-tablet-buttons') {
-      const hasData = this.capturedPackets.length > 0;
-      const buttonCount = this.detectedButtonStates.size;
-      const buttonStates = Array.from(this.detectedButtonStates).sort((a, b) => a - b);
-
-      return html`
-        <div class="section walkthrough active">
-          <div class="step-header">
-            <h3>Step 9: Tablet Buttons</h3>
-            <button class="icon-button" @click="${this._resetCapture}" title="Reset">🔄</button>
-            <hid-walkthrough-progress currentStep="8" totalSteps="10"></hid-walkthrough-progress>
-            <button class="icon-button" ?disabled="${!hasData}" @click="${() => this._completeManualStep('tablet-buttons')}" title="Next Step">→</button>
-          </div>
-          <div class="step-description">
-            <p>This will help us identify which byte contains the <strong>tablet button states</strong>.</p>
-            <p><strong>Instructions:</strong> Press each button on your tablet (the express keys on the device itself, not the stylus buttons). Try to press all buttons at least once.</p>
-            <p class="note">💡 If your tablet doesn't have express keys, you can skip this step by clicking the → button.</p>
-          </div>
-
-          ${buttonCount > 0 ? html`
-            <div class="detection-feedback" style="margin: 1rem 0; padding: 1rem; background: #e8f5e9; border-radius: 4px; border-left: 4px solid #4caf50;">
-              <div style="font-weight: 600; color: #2e7d32; margin-bottom: 0.5rem;">
-                ✓ Detected ${buttonCount} button state${buttonCount !== 1 ? 's' : ''}
-              </div>
-              <div style="font-size: 0.9rem; color: #555;">
-                Button values: ${buttonStates.map(v => `0x${v.toString(16).toUpperCase()}`).join(', ')}
-              </div>
-              <div style="font-size: 0.85rem; color: #666; margin-top: 0.5rem;">
-                💡 Each value represents a different button or button combination
-              </div>
-            </div>
-          ` : ''}
-
-          <div class="gesture-controls">
-            <button class="simulate-button" ?disabled="${this.isPlaying}" @click="${() => this._playGesture('tablet-buttons')}">
-              ${this.isPlaying ? '⏳ Simulating...' : '🤖 Simulate this data'}
-            </button>
-          </div>
-        </div>
-      `;
-    }
-
+    // For step10-metadata and complete, render custom content
     if (this.walkthroughStep === 'step10-metadata') {
       return html`
         <div class="section walkthrough active">
-          <div class="step-header">
-            <h3>Step 10: Device Information</h3>
-            <button class="icon-button" @click="${this._resetCapture}" title="Reset">🔄</button>
-            <hid-walkthrough-progress currentStep="9" totalSteps="10"></hid-walkthrough-progress>
-            <button class="icon-button" disabled title="Next Step">→</button>
-          </div>
-          <p>Please provide some additional information about your device to complete the configuration.</p>
-
-          <device-metadata-form
-            .suggestedName=${this._generateSuggestedName()}
-            .suggestedManufacturer=${this._generateSuggestedManufacturer()}
-            .suggestedModel=${this._generateSuggestedModel()}
-            .suggestedDescription=${this._generateSuggestedDescription()}
-            .suggestedButtonCount=${this._generateSuggestedButtonCount()}
+          <hid-walkthrough
+            .currentStep=${this.walkthroughStep}
+            .isPlaying=${this.isPlaying}
+            .capturedPacketCount=${this.capturedPackets.length}
+            @play-gesture=${(e: CustomEvent) => this._playGesture(e.detail.gesture)}
+            @step-complete=${() => this._completeManualStep('metadata')}
+            @step-reset=${this._resetCapture}
             @metadata-submit=${this._handleMetadataSubmit}
-            @metadata-cancel=${this._handleMetadataCancel}
-          ></device-metadata-form>
+          ></hid-walkthrough>
         </div>
       `;
     }
@@ -539,7 +374,6 @@ export class HidDataReader extends LitElement {
           <div class="step-header">
             <h3>✅ Configuration Complete!</h3>
             <button class="icon-button" @click="${this._resetCapture}" title="Reset">🔄</button>
-            <hid-walkthrough-progress currentStep="10" totalSteps="10"></hid-walkthrough-progress>
             <button class="icon-button" disabled title="Next Step">→</button>
           </div>
           <p>Your complete device configuration is ready!</p>
@@ -549,7 +383,41 @@ export class HidDataReader extends LitElement {
       `;
     }
 
-    return html``;
+    // For all other steps, use the walkthrough component
+    return html`
+      <hid-walkthrough
+        .currentStep=${this.walkthroughStep}
+        .isPlaying=${this.isPlaying}
+        .capturedPacketCount=${this.capturedPackets.length}
+        .horizontalBytes=${this.horizontalBytes}
+        .verticalBytes=${this.verticalBytes}
+        .pressureBytes=${this.pressureBytes}
+        .tiltXBytes=${this.tiltXBytes}
+        .tiltYBytes=${this.tiltYBytes}
+        .tabletButtonBytes=${this.tabletButtonBytes}
+        .detectedButtonStates=${this.detectedButtonStates}
+        .deviceConfig=${this.deviceConfig}
+        .completeConfig=${this.completeConfig}
+        @play-gesture=${(e: CustomEvent) => this._playGesture(e.detail.gesture)}
+        @step-complete=${() => this._completeManualStep(this._getGestureForStep(this.walkthroughStep))}
+        @step-reset=${this._resetCapture}
+      ></hid-walkthrough>
+    `;
+  }
+
+  private _getGestureForStep(step: WalkthroughStep): string {
+    const gestureMap: Record<string, string> = {
+      'step1-horizontal': 'horizontal',
+      'step2-vertical': 'vertical',
+      'step3-pressure': 'pressure',
+      'step4-hover-movement': 'hover-movement',
+      'step5-tilt-x': 'tilt-x',
+      'step6-tilt-y': 'tilt-y',
+      'step7-primary-button': 'primary-button',
+      'step8-secondary-button': 'secondary-button',
+      'step9-tablet-buttons': 'tablet-buttons',
+    };
+    return gestureMap[step] || '';
   }
 
   private _renderByteAnalysis() {
@@ -855,7 +723,7 @@ export class HidDataReader extends LitElement {
     this.currentBytes = hexString;
 
     // Track button states in real-time during tablet buttons step
-    if (this.walkthroughStep === 'step10-tablet-buttons' && data.length > 9) {
+    if (this.walkthroughStep === 'step9-tablet-buttons' && data.length > 9) {
       // Button data is typically in byte 9 (0-based index) for our mock device
       const buttonByte = data[9];
       if (buttonByte > 0) {
@@ -1424,112 +1292,6 @@ export class HidDataReader extends LitElement {
     return null;
   }
 
-  private _renderLiveAnalysis() {
-    // Always show live analysis section
-    // Use current packets if available, otherwise use last captured packets
-    const packetsToShow = this.capturedPackets.length > 0
-      ? this.capturedPackets
-      : this.lastCapturedPackets;
-
-    // Get device info for the active device
-    // Use the current active device index (set when data comes in)
-    const activeDeviceIndex = this.currentActiveDeviceIndex;
-    const deviceStream = activeDeviceIndex !== undefined ? this.deviceDataStreams.get(activeDeviceIndex) : undefined;
-
-    // Handle mock device (index -1) vs real devices
-    const isMockDevice = activeDeviceIndex === -1;
-    const device = isMockDevice ? null : (activeDeviceIndex !== undefined ? this.realDevices[activeDeviceIndex] : undefined);
-    const collection = device?.collections[0];
-
-    const deviceInfo = activeDeviceIndex !== undefined ? {
-      deviceNumber: activeDeviceIndex,
-      packetCount: deviceStream?.packetCount || 0,
-      usagePage: isMockDevice ? 13 : collection?.usagePage,
-      usage: isMockDevice ? 2 : collection?.usage,
-      isMock: isMockDevice
-    } : undefined;
-
-    if (packetsToShow.length === 0) {
-      // Show empty placeholder cells (typical HID packet has 9 bytes)
-      return html`<bytes-display .isEmpty=${true} .placeholderCount=${9} .deviceInfo=${deviceInfo}></bytes-display>`;
-    }
-
-    // Get the latest packet
-    const latestPacket = packetsToShow[packetsToShow.length - 1];
-
-    // Analyze captured packets in real-time
-    const analysis = analyzeBytes(packetsToShow);
-
-    // Filter out bytes we've already identified in previous steps
-    const knownByteIndices = new Set([
-      ...this.horizontalBytes.map(b => b.byteIndex),
-      ...this.verticalBytes.map(b => b.byteIndex),
-      ...this.pressureBytes.map(b => b.byteIndex),
-      ...this.hoverHorizontalBytes.map(b => b.byteIndex),
-      ...this.hoverVerticalBytes.map(b => b.byteIndex),
-      ...this.tiltXBytes.map(b => b.byteIndex),
-      ...this.tiltYBytes.map(b => b.byteIndex),
-    ]);
-
-    // Also filter out likely status/report bytes:
-    // - Bytes with very low variance (< 10) but multiple distinct values = likely status byte
-    // - Bytes that are constant (variance = 0) = likely report ID
-    const movementAnalysis = analysis.filter(byte => {
-      // Skip already identified bytes
-      if (knownByteIndices.has(byte.byteIndex)) return false;
-
-      // Skip constant bytes (report ID)
-      if (byte.variance === 0) return false;
-
-      // Skip low-variance bytes with few distinct values (likely status byte)
-      if (byte.variance < 10) {
-        const uniqueValues = new Set(this.capturedPackets.map(p => p[byte.byteIndex]));
-        if (uniqueValues.size <= 5) return false; // Status bytes typically have few states
-      }
-
-      return true;
-    });
-
-    // Get best guess bytes (top 3 by variance) - this is what we think is relevant
-    const bestGuessBytes = getBestGuessBytesByVariance(movementAnalysis, 3);
-    const bestGuessIndices = new Set(bestGuessBytes.map(b => b.byteIndex));
-
-    // Create a map of byte index to analysis data
-    const analysisMap = new Map(analysis.map(a => [a.byteIndex, a]));
-
-    // Compute real-time best guess labels for current step
-    const realtimeLabels = this._getRealtimeBestGuessLabels(bestGuessBytes);
-
-    // Build byte data array for the bytes-display component
-    const bytesData: {
-      byteIndex: number;
-      value: number;
-      min: number | undefined;
-      max: number | undefined;
-      variance: number | undefined;
-      isBestGuess: boolean;
-      isIdentified: boolean;
-      label: string | null
-    }[] = Array.from(latestPacket).map((value, byteIndex) => {
-      const isBestGuess = bestGuessIndices.has(byteIndex);
-      const analysisData = analysisMap.get(byteIndex);
-      const byteLabel = this._getByteLabel(byteIndex) || realtimeLabels.get(byteIndex) || null;
-
-      return {
-        byteIndex,
-        value,
-        min: analysisData?.min,
-        max: analysisData?.max,
-        variance: analysisData?.variance,
-        isBestGuess,
-        isIdentified: !!byteLabel,
-        label: byteLabel
-      };
-    });
-
-    return html`<bytes-display .bytes=${bytesData} .deviceInfo=${deviceInfo}></bytes-display>`;
-  }
-
   private _getRealtimeBestGuessLabels(bestGuessBytes: ByteAnalysis[]): Map<number, string> {
     const labels = new Map<number, string>();
 
@@ -1607,7 +1369,7 @@ export class HidDataReader extends LitElement {
     this.currentActiveDeviceIndex = undefined;
 
     // Reset button states if in tablet buttons step
-    if (this.walkthroughStep === 'step10-tablet-buttons') {
+    if (this.walkthroughStep === 'step9-tablet-buttons') {
       this.detectedButtonStates = new Set();
     }
 

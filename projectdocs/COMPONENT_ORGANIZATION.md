@@ -2,27 +2,38 @@
 
 The project has been reorganized with each component in its own folder and CSS separated into dedicated style files.
 
-## 📁 New Structure
+## 📁 Structure
 
 ```
 src/
 ├── components/
-│   ├── tablet-app/
-│   │   ├── tablet-app.ts           # Main app component
-│   │   └── tablet-app.styles.ts    # Separated CSS styles
-│   ├── tablet-status/
-│   │   ├── tablet-status.ts        # Status display component  
-│   │   └── tablet-status.styles.ts # Separated CSS styles
-│   └── drawing-canvas/
-│       ├── drawing-canvas.ts       # Canvas component
-│       └── drawing-canvas.styles.ts # Separated CSS styles
-├── data-helpers.ts                 # HID data parsing utilities
-├── event-emitter.ts                # Event system
-├── finddevice.ts                   # Device discovery
-├── hid-reader.ts                   # HID data reader
-├── index.ts                        # Public API exports
-└── types/
-    └── webhid.d.ts                 # WebHID TypeScript definitions
+│   ├── hid-data-reader/
+│   │   ├── hid-data-reader.ts           # Main HID data reader component
+│   │   └── hid-data-reader.styles.ts    # Separated CSS styles
+│   ├── bytes-display/
+│   │   ├── bytes-display.ts             # Byte visualization component
+│   │   └── bytes-display.styles.ts      # Separated CSS styles
+│   ├── drawing-canvas/
+│   │   ├── drawing-canvas.ts            # Canvas component
+│   │   └── drawing-canvas.styles.ts     # Separated CSS styles
+│   ├── hid-json-config/
+│   │   ├── hid-json-config.ts           # JSON config display
+│   │   └── hid-json-config.styles.ts    # Separated CSS styles
+│   ├── hid-walkthrough-progress/
+│   │   ├── hid-walkthrough-progress.ts  # Progress indicator
+│   │   └── hid-walkthrough-progress.styles.ts
+│   └── device-metadata-form/
+│       └── device-metadata-form.ts      # Device metadata form
+├── utils/
+│   ├── data-helpers.ts                  # HID data parsing utilities
+│   ├── event-emitter.ts                 # Event system
+│   ├── finddevice.ts                    # Device discovery
+│   ├── hid-reader.ts                    # HID data reader
+│   └── byte-detector.ts                 # Byte analysis utilities
+├── models/
+│   └── config.ts                        # Configuration model
+├── mockbytes/                           # Mock tablet simulation
+└── index.ts                             # Public API exports
 ```
 
 ## 🎨 Component Structure
@@ -79,13 +90,13 @@ export const styles = css`
 ### From HTML
 ```html
 <!-- Load only the main component, it loads its dependencies -->
-<script type="module" src="/src/components/tablet-app/tablet-app.ts"></script>
+<script type="module" src="/src/components/hid-data-reader/hid-data-reader.ts"></script>
 ```
 
 ### From TypeScript
 ```typescript
 // Import a component
-import './components/tablet-status/tablet-status.js';
+import './components/bytes-display/bytes-display.js';
 
 // Import styles (for extending or reusing)
 import { styles } from './component-name.styles.js';
@@ -94,12 +105,14 @@ import { styles } from './component-name.styles.js';
 ## Component Dependencies
 
 ```
-tablet-app
-├── tablet-status (child component)
-└── drawing-canvas (child component)
+hid-data-reader
+├── bytes-display (child component)
+├── hid-json-config (child component)
+├── hid-walkthrough-progress (child component)
+└── device-metadata-form (child component)
 ```
 
-The main `tablet-app` component automatically imports and uses the other components.
+The main `hid-data-reader` component automatically imports and uses the other components.
 
 ## Style Architecture
 
@@ -151,11 +164,6 @@ The project uses two TypeScript configurations:
 
 ## Testing
 
-All 94 unit tests continue to pass after reorganization:
-- ✅ 40 tests for data helpers
-- ✅ 28 tests for device finder  
-- ✅ 26 tests for HID reader
-
 Run tests: `npm test`
 
 ## Development
@@ -180,4 +188,3 @@ Output includes:
 - Compiled TypeScript
 - Bundled components
 - Type definitions
-

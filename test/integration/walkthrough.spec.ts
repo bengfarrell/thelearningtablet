@@ -4,7 +4,7 @@ import * as path from 'path';
 
 test.describe('HID Data Reader Walkthrough', () => {
   test.beforeEach(async ({ page }) => {
-    await page.goto('/hid-reader.html');
+    await page.goto('/');
     // Wait for the component to be ready
     await page.waitForSelector('hid-data-reader');
   });

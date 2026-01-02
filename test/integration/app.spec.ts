@@ -1,15 +1,9 @@
 import { test, expect } from '@playwright/test';
 
-test.describe('Tablet App', () => {
-  test('should display the main heading', async ({ page }) => {
+test.describe('HID Data Reader App', () => {
+  test('should render the hid-data-reader component', async ({ page }) => {
     await page.goto('/');
-    const heading = page.locator('h1');
-    await expect(heading).toContainText('The Learning Tablet');
-  });
-
-  test('should render the application', async ({ page }) => {
-    await page.goto('/');
-    const app = page.locator('tablet-app');
+    const app = page.locator('hid-data-reader');
     await expect(app).toBeVisible();
   });
 
@@ -18,16 +12,21 @@ test.describe('Tablet App', () => {
     await expect(page).toHaveTitle(/The Learning Tablet/);
   });
 
-  test('should display device status heading', async ({ page }) => {
+  test('should display connect button when not connected', async ({ page }) => {
     await page.goto('/');
-    const heading = page.getByText('Device Status');
-    await expect(heading).toBeVisible();
+    const connectButton = page.getByRole('button', { name: /Connect Real Tablet/i });
+    await expect(connectButton).toBeVisible();
   });
 
-  test('should display drawing canvas heading', async ({ page }) => {
+  test('should display walkthrough step 1 on load', async ({ page }) => {
     await page.goto('/');
-    const heading = page.getByText('Drawing Canvas');
-    await expect(heading).toBeVisible();
+    const stepHeading = page.getByText('Step 1: Horizontal Movement');
+    await expect(stepHeading).toBeVisible();
+  });
+
+  test('should have simulate button for walkthrough', async ({ page }) => {
+    await page.goto('/');
+    const simulateButton = page.getByRole('button', { name: /Simulate this data/i });
+    await expect(simulateButton).toBeVisible();
   });
 });
-

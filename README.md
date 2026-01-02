@@ -18,8 +18,8 @@ All documentation is organized in the [`projectdocs/`](./projectdocs) folder:
 
 - **LitElement Web Components** - Modern, lightweight web components with TypeScript
 - **WebHID Integration** - Direct hardware access to graphics tablets
-- **Real-time Drawing Canvas** - Interactive canvas with pressure sensitivity simulation
-- **Device Management** - Easy connection and status monitoring
+- **HID Data Reader** - Interactive byte-level walkthrough for configuring tablet devices
+- **Device Configuration Generation** - Automatic detection of byte mappings for coordinates, pressure, tilt, and buttons
 - **Comprehensive Testing** - Unit tests with Vitest and integration tests with Playwright
 - **Hot Module Replacement** - Fast development with Vite
 
@@ -91,19 +91,23 @@ npm run preview
 thelearningtablet/
 ├── src/
 │   ├── components/           # LitElement web components
-│   │   ├── tablet-app.ts     # Main application component
-│   │   ├── tablet-status.ts  # Connection status component
-│   │   └── drawing-canvas.ts # Interactive drawing canvas
-│   ├── finddevice.ts         # HID device discovery
-│   ├── hid-reader.ts         # HID data reading
-│   ├── tablet-controller.ts  # Main tablet controller
+│   │   ├── hid-data-reader/  # Main HID data reader component
+│   │   ├── bytes-display/    # Byte visualization component
+│   │   ├── drawing-canvas/   # Interactive drawing canvas
+│   │   └── ...               # Other UI components
+│   ├── utils/                # Utility modules
+│   │   ├── finddevice.ts     # HID device discovery
+│   │   ├── hid-reader.ts     # HID data reading
+│   │   ├── data-helpers.ts   # Data parsing utilities
+│   │   └── byte-detector.ts  # Byte analysis for config detection
+│   ├── models/               # Data models
+│   │   └── config.ts         # Tablet configuration model
+│   ├── mockbytes/            # Mock tablet simulation
 │   └── index.ts              # Public API exports
 ├── test/
 │   ├── unit/                 # Vitest unit tests
 │   ├── integration/          # Playwright integration tests
 │   └── setup.ts              # Test setup configuration
-├── event-emitter.ts          # Event system
-├── data-helpers.ts           # Data parsing utilities
 ├── index.html                # App entry point
 ├── vite.config.ts            # Vite configuration
 ├── playwright.config.ts      # Playwright configuration
@@ -112,25 +116,25 @@ thelearningtablet/
 
 ## 🎨 Components
 
-### `<tablet-app>`
-Main application component that orchestrates the tablet interface.
+### `<hid-data-reader>`
+Main application component that provides an interactive walkthrough for configuring tablet devices. Guides users through detecting byte mappings for coordinates, pressure, tilt, and buttons.
 
-### `<tablet-status>`
-Displays device connection status and provides connection controls.
+### `<bytes-display>`
+Visualizes raw HID byte data with real-time analysis and labeling of detected byte functions.
 
 ### `<drawing-canvas>`
 Interactive canvas for drawing with mouse or tablet input.
 
 ## 🧩 Core Services
 
-### TabletController
-High-level controller for managing tablet connections and processing tablet events.
-
 ### HIDReader
-Handles reading data from HID devices and processing raw data.
+Handles reading data from HID devices and processing raw data according to configuration mappings.
 
 ### DeviceFinder
-Manages device discovery, enumeration, and connection.
+Manages device discovery, enumeration, and connection via WebHID API.
+
+### Config
+Tablet configuration model with serialization/deserialization for loading and saving device configurations.
 
 ## 📝 Scripts
 
@@ -158,4 +162,3 @@ MIT
 ## 🤝 Contributing
 
 Contributions are welcome! Please feel free to submit a Pull Request.
-

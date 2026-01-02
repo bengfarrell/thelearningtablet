@@ -27,15 +27,18 @@ This will:
 
 ## Step 3: Explore the App
 
-The application will open in your browser showing:
+The application will open in your browser showing the **HID Data Reader**:
 
-1. **Device Status Panel** - Shows connection state
-   - Click "Connect Device" to connect a tablet (demo mode available)
+1. **Connect a Device** - Click "Connect Real Tablet" to pair with a graphics tablet
+   - Or use the "Simulate" buttons to test without hardware
    
-2. **Drawing Canvas** - Interactive drawing area
-   - Draw with your mouse to test
-   - Real tablet will provide pressure sensitivity
-   - Use controls to change colors or clear canvas
+2. **Follow the Walkthrough** - The app guides you through 10 steps:
+   - Horizontal/Vertical movement detection
+   - Pressure and tilt detection
+   - Button detection
+   - Device metadata entry
+   
+3. **Generate Configuration** - At the end, you'll get a complete JSON config for your tablet
 
 ## Running Tests
 
@@ -63,17 +66,20 @@ npm run test:integration
 
 ```
 src/
-├── components/          # UI components
-│   ├── tablet-app.ts    # Main app
-│   ├── tablet-status.ts # Connection UI
-│   └── drawing-canvas.ts # Drawing surface
-├── tablet-controller.ts # Core tablet logic
-├── hid-reader.ts        # HID data reader
-└── finddevice.ts        # Device discovery
+├── components/              # UI components
+│   ├── hid-data-reader/     # Main HID reader component
+│   ├── bytes-display/       # Byte visualization
+│   └── drawing-canvas/      # Drawing surface
+├── utils/                   # Utility modules
+│   ├── hid-reader.ts        # HID data reader
+│   ├── finddevice.ts        # Device discovery
+│   └── byte-detector.ts     # Byte analysis
+├── models/                  # Data models
+└── mockbytes/               # Mock tablet simulation
 
 test/
-├── unit/                # Service unit tests
-└── integration/         # UI integration tests
+├── unit/                    # Service unit tests
+└── integration/             # UI integration tests
 ```
 
 ## Common Commands
@@ -92,15 +98,14 @@ test/
 ## Next Steps
 
 - Connect a real graphics tablet via WebHID
+- Use the walkthrough to generate a configuration for your tablet
 - Modify the components in `src/components/`
 - Add new tests in `test/unit/` or `test/integration/`
-- Build custom features with the tablet controller API
 
 ## Need Help?
 
 - Check out the [full README](./README.md)
-- Review the [component examples](./src/components/)
-- Look at the [test examples](./test/)
+- Review the [component examples](../src/components/)
+- Look at the [test examples](../test/)
 
 Happy coding! 🎨
-

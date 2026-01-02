@@ -13,7 +13,7 @@ Get up and running with the project in 3 easy steps:
 
 ### [Test Coverage](./TEST_COVERAGE.md)
 Complete overview of the test suite:
-- 94 unit tests across 3 modules
+- Unit tests across multiple modules
 - Test organization and structure
 - Coverage metrics and reporting
 - Running tests in different modes
@@ -56,13 +56,15 @@ npm run build         # Build for production
 thelearningtablet/
 ├── src/
 │   ├── components/        # LitElement web components
-│   │   ├── tablet-app/
-│   │   ├── tablet-status/
+│   │   ├── hid-data-reader/
+│   │   ├── bytes-display/
 │   │   └── drawing-canvas/
-│   ├── finddevice.ts      # Device discovery
-│   ├── hid-reader.ts      # HID data reading
-│   ├── event-emitter.ts   # Event system
-│   └── data-helpers.ts    # Parsing utilities
+│   ├── utils/             # Utility modules
+│   │   ├── finddevice.ts  # Device discovery
+│   │   ├── hid-reader.ts  # HID data reading
+│   │   └── data-helpers.ts# Parsing utilities
+│   ├── models/            # Data models
+│   └── mockbytes/         # Mock tablet simulation
 ├── test/
 │   ├── unit/              # Vitest unit tests
 │   └── integration/       # Playwright integration tests
@@ -119,5 +121,4 @@ When adding new documentation:
 
 ---
 
-**Last Updated**: November 2025
-
+**Last Updated**: January 2026
